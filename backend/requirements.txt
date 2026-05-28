@@ -12,6 +12,6 @@ firebase-admin
 python-multipart
 python-dotenv
 python-magic
-python-magic-bin
+python-magic-bin; sys_platform == 'win32'
 slowapi
 httpx
