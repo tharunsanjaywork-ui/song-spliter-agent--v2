@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+librosa
+pydub
+scipy
+numpy
+openai
+requests
+cloudinary
+cryptography
+firebase-admin
+python-multipart
+python-dotenv
+python-magic
+python-magic-bin
+slowapi
+httpx
