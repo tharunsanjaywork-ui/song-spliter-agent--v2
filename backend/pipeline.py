@@ -365,34 +365,22 @@ def _split_audio_ffmpeg(
         fname = f"song_{i + 1:02d}.mp3"
         fpath = os.path.join(output_dir, fname)
 
-        # Run ffmpeg stream copy. Position seeking -ss and -t after -i for universal Linux compatibility.
-        cmd_copy = [
+        # Transcode segment with fast input seeking (ss before i) and high quality MP3 encoding
+        cmd_transcode = [
             "ffmpeg", "-y",
-            "-i", audio_path,
             "-ss", f"{start:.3f}",
+            "-i", audio_path,
             "-t", f"{seg_dur:.3f}",
-            "-c", "copy",
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
             fpath
         ]
         try:
-            logger.info("Running FFmpeg split copy segment %d: %s", i + 1, " ".join(cmd_copy))
-            subprocess.run(cmd_copy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("Running FFmpeg split transcode segment %d: %s", i + 1, " ".join(cmd_transcode))
+            subprocess.run(cmd_transcode, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError as exc:
-            logger.warning("FFmpeg copy split failed, falling back to transcode")
-            # Fallback to transcoding (re-encoding) which parses and repairs frames if headers are missing
-            cmd_transcode = [
-                "ffmpeg", "-y",
-                "-i", audio_path,
-                "-ss", f"{start:.3f}",
-                "-t", f"{seg_dur:.3f}",
-                "-b:a", "192k",
-                fpath
-            ]
-            logger.info("Running FFmpeg split transcode: %s", " ".join(cmd_transcode))
-            res = subprocess.run(cmd_transcode, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if res.returncode != 0:
-                logger.error("FFmpeg transcode failed with code %d", res.returncode)
-                raise RuntimeError(f"FFmpeg split failed (exit {res.returncode})")
+            logger.error("FFmpeg transcode failed for segment %d with code %d", i + 1, exc.returncode)
+            raise RuntimeError(f"FFmpeg split failed (exit {exc.returncode})")
 
         output_files.append({
             "index": i,
