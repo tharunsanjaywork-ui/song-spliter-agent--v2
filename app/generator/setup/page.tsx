@@ -572,10 +572,12 @@ function GeneratorSetupPage() {
 
               {/* Lightbox Image Container */}
               <div className="relative w-full h-full bg-[rgba(255,255,255,0.01)] border border-[rgba(255,255,255,0.05)] rounded-2xl p-4 overflow-hidden flex items-center justify-center shadow-2xl">
-                <img
+                <Image
                   src={activeLightboxImage}
                   alt="Expanded setup step"
-                  className="max-w-full max-h-full object-contain rounded-lg shadow-2xl border border-[rgba(255,255,255,0.08)] bg-[var(--bg-deep)]"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 1024px"
+                  className="object-contain rounded-lg shadow-2xl border border-[rgba(255,255,255,0.08)] bg-[var(--bg-deep)]"
                 />
               </div>
             </motion.div>

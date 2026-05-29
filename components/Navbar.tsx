@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Navbar() {
@@ -15,7 +16,7 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await signOut(getFirebaseAuth());
       router.push("/");
     } catch (error) {
       console.error("Logout failed:", error);
@@ -66,9 +67,12 @@ export default function Navbar() {
             {user && (
               <div className="flex items-center space-x-3 bg-[rgba(255,255,255,0.03)] px-3 py-1.5 rounded-lg border border-[var(--glass-border)]">
                 {user.photoURL ? (
-                  <img
+                  <Image
                     src={user.photoURL}
                     alt={user.displayName || "User"}
+                    width={24}
+                    height={24}
+                    unoptimized
                     className="w-6 h-6 rounded-full border border-[var(--accent-cyan)]"
                   />
                 ) : (
@@ -139,9 +143,12 @@ export default function Navbar() {
             {user && (
               <div className="flex items-center space-x-3 px-3 py-1.5">
                 {user.photoURL ? (
-                  <img
+                  <Image
                     src={user.photoURL}
                     alt={user.displayName || "User"}
+                    width={32}
+                    height={32}
+                    unoptimized
                     className="w-8 h-8 rounded-full border border-[var(--accent-cyan)]"
                   />
                 ) : (

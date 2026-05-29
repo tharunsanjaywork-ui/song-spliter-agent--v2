@@ -1,10 +1,11 @@
-import { auth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 
 /**
  * Returns the current Firebase user's ID token string.
  * Throws if there is no authenticated user.
  */
 export async function getIdToken(): Promise<string> {
+  const auth = getFirebaseAuth();
   const currentUser = auth.currentUser;
 
   if (!currentUser) {

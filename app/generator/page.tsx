@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getFirebaseDb } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function GeneratorHubPage() {
@@ -19,6 +19,7 @@ export default function GeneratorHubPage() {
 
     const checkSetup = async () => {
       try {
+        const db = getFirebaseDb();
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
 

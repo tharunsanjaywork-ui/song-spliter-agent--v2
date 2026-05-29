@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { User, onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 
 interface AuthState {
   user: User | null;
@@ -15,6 +15,16 @@ export function useAuth(): AuthState {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    let auth;
+    try {
+      auth = getFirebaseAuth();
+    } catch (error) {
+      console.error("Firebase auth is not configured:", error);
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
@@ -25,7 +35,7 @@ export function useAuth(): AuthState {
   }, []);
 
   async function logout(): Promise<void> {
-    await signOut(auth);
+    await signOut(getFirebaseAuth());
   }
 
   return { user, loading, logout };

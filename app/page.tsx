@@ -15,7 +15,7 @@ import {
   browserLocalPersistence,
   ConfirmationResult,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 import DOMPurify from "dompurify";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -63,7 +63,9 @@ export default function LoginPage() {
 
   // Setup persistence helper
   const prepareAuth = async () => {
+    const auth = getFirebaseAuth();
     await setPersistence(auth, browserLocalPersistence);
+    return auth;
   };
 
   // Google Login Flow
@@ -71,7 +73,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await prepareAuth();
+      const auth = await prepareAuth();
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
       setSuccess("Logged in successfully!");
@@ -89,7 +91,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await prepareAuth();
+      const auth = await prepareAuth();
       const provider = new OAuthProvider("apple.com");
       await signInWithPopup(auth, provider);
       setSuccess("Logged in successfully!");
@@ -112,7 +114,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await prepareAuth();
+      const auth = await prepareAuth();
       await signInWithEmailAndPassword(auth, email.trim(), password);
       setSuccess("Logged in successfully!");
       router.push("/welcome");
@@ -148,7 +150,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await prepareAuth();
+      const auth = await prepareAuth();
       await createUserWithEmailAndPassword(auth, email.trim(), password);
       setSuccess("Account created successfully!");
       router.push("/welcome");
@@ -175,7 +177,7 @@ export default function LoginPage() {
     setError(null);
     
     try {
-      await prepareAuth();
+      const auth = await prepareAuth();
       
       // Initialize ReCaptcha Verifier if not already done
       if (!recaptchaVerifierRef.current) {
