@@ -1,4 +1,5 @@
 import { getIdToken } from "@/lib/auth";
+import { AnalysisResult } from "@/lib/audioAnalyzer";
 
 // ─── Shared Types ─────────────────────────────────────────────────────────────
 
@@ -167,11 +168,13 @@ function parseSseBuffer(
 
 export async function streamProcess(
   file: File,
+  analysis: AnalysisResult,
   onEvent: (event: ProcessingEvent) => void
 ): Promise<void> {
   const headers = await authHeaders();
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("analysis", JSON.stringify(analysis));
 
   const response = await fetch(`${BACKEND_URL}/api/process`, {
     method: "POST",

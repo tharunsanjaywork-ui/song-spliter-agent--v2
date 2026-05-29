@@ -1,13 +1,8 @@
 """
 pipeline.py
-AudioWave backend — 4-step audio processing pipeline.
-
-Extracts the logic from spliter_agent.py into async functions:
-  step1_analyze  — librosa feature extraction
-  step2_llm      — DeepSeek V4 Flash via OpenRouter
-  step3_split    — pydub splitting with energy snap
-  step4_name     — ACRCloud music recognition
-  run_pipeline   — orchestrator yielding SSE events
+AudioWave backend — 4-step audio processing pipeline (Route A / Hybrid client-side).
+No longer imports librosa or scipy. Bypasses feature extraction using client analysis JSON.
+Splits audio using FFmpeg stream copy and names songs in parallel via ACRCloud.
 """
 
 import asyncio
@@ -18,289 +13,52 @@ import json
 import logging
 import os
 import re
-import shutil
+import subprocess
 import time
-import uuid
 from typing import AsyncGenerator
 
-import librosa
-import numpy as np
 import requests
 from openai import OpenAI
-from pydub import AudioSegment
-from scipy.signal import find_peaks, savgol_filter
 
 logger = logging.getLogger(__name__)
 
-# ── Custom Exceptions ──────────────────────────────────────────────────────────
-
+# -- Custom Exceptions --
 class ACRLimitExceeded(Exception):
-    """ACRCloud error code 3003 — trial limit exceeded."""
     pass
-
 
 class ACRInvalidCredentials(Exception):
-    """ACRCloud signature or credential verification failed."""
     pass
-
 
 class OpenRouterLimitExceeded(Exception):
-    """OpenRouter 402 or insufficient balance error."""
     pass
 
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
+# -- Constants --
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
 AVG_SONG_MIN = 4.5
 MIN_SONG_SEC = 180
 MAX_SONG_SEC = 390
-ALLOWED_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"}
 ACR_CLIP_SECONDS = 12
 ACR_SKIP_OFFSETS = [5, 20, 40, 60]
 
+def _snap_to_valley(cut_time: float, valleys: list, window: float = 5.0) -> float:
+    """Snap a cut time to the nearest silence valley from the client analysis."""
+    best_time = cut_time
+    min_dist = window
+    for v in valleys:
+        v_time = float(v.get("time_sec", 0))
+        dist = abs(v_time - cut_time)
+        if dist < min_dist:
+            min_dist = dist
+            best_time = v_time
+    return best_time
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 1 — Audio Feature Extraction (from spliter_agent.py lines 1-354)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _extract_features(audio_path: str) -> dict:
-    """
-    Run librosa feature extraction on the audio file.
-    Returns the full analysis dict with metadata, valleys,
-    novelty peaks, and per-second table.
-    """
-    logger.info("Step 1: Loading audio file %s", audio_path)
-    y, sr = librosa.load(audio_path, sr=16000, mono=True)
-    duration = librosa.get_duration(y=y, sr=sr)
-    total_sec = int(duration)
-    target_songs = max(2, round(duration / (AVG_SONG_MIN * 60)))
-
-    # Energy at 10ms resolution
-    hop_fine = int(sr * 0.01)
-    rms_fine = librosa.feature.rms(
-        y=y, frame_length=int(sr * 0.05), hop_length=hop_fine
-    )[0]
-    rms_db = librosa.amplitude_to_db(rms_fine, ref=np.max)
-    t_fine = librosa.frames_to_time(
-        np.arange(len(rms_db)), sr=sr, hop_length=hop_fine
-    )
-
-    # Energy at 1-second resolution
-    energy_per_sec = []
-    for s in range(total_sec):
-        lo = int(np.searchsorted(t_fine, s))
-        hi = int(np.searchsorted(t_fine, s + 1))
-        hi = max(hi, lo + 1)
-        chunk = rms_db[lo : min(hi, len(rms_db))]
-        energy_per_sec.append(round(float(np.mean(chunk)), 1))
-
-    # MFCC at 1s resolution
-    hop_1s = sr
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop_1s)
-    mfcc_means = [
-        round(float(np.mean(mfcc[:, i])), 2) for i in range(mfcc.shape[1])
-    ]
-    mfcc_stds = [
-        round(float(np.std(mfcc[:, i])), 2) for i in range(mfcc.shape[1])
-    ]
-
-    # Chroma at 1s resolution
-    chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop_1s)
-    chroma_peak = [
-        int(np.argmax(chroma[:, i])) for i in range(chroma.shape[1])
-    ]
-
-    # Mel spectrogram difference
-    mel = librosa.feature.melspectrogram(
-        y=y, sr=sr, n_mels=64, hop_length=hop_1s, n_fft=2048
-    )
-    mel_db = librosa.power_to_db(mel, ref=np.max)
-    mel_diff = np.sqrt(np.sum(np.diff(mel_db, axis=1) ** 2, axis=0))
-    mel_diff = np.append(mel_diff, 0)
-    if mel_diff.max() > 0:
-        mel_diff = mel_diff / mel_diff.max()
-    mel_novelty = [round(float(mel_diff[i]), 3) for i in range(len(mel_diff))]
-
-    # Deep energy valleys
-    valleys = _find_valleys(rms_db, t_fine)
-    candidates = [
-        v for v in valleys if v["is_candidate"] and v["depth_db"] < -42.0
-    ]
-
-    # Per-second table
-    per_second = _build_per_second(
-        total_sec, energy_per_sec, mfcc, mfcc_means, mfcc_stds,
-        chroma, chroma_peak, mel_novelty
-    )
-
-    # Combined novelty score
-    _compute_novelty(per_second)
-    novelty_smooth = np.array([r["novelty_smooth"] for r in per_second])
-
-    # Top novelty peaks
-    top_peaks = []
-    if len(novelty_smooth) > 15:
-        peaks, _ = find_peaks(
-            novelty_smooth, distance=120, prominence=0.1, height=0.2
-        )
-        top_peaks = [
-            {"s": int(p), "t": f"{p // 60}:{p % 60:02d}",
-             "novelty": round(float(novelty_smooth[p]), 3)}
-            for p in peaks
-        ]
-
-    return {
-        "metadata": {
-            "duration_sec": round(duration, 1),
-            "duration_fmt": f"{int(duration // 60)}:{int(duration % 60):02d}",
-            "sample_rate": sr,
-            "target_songs": target_songs,
-            "min_song_sec": MIN_SONG_SEC,
-            "max_song_sec": MAX_SONG_SEC,
-        },
-        "energy_valleys": valleys,
-        "strong_candidates": candidates,
-        "top_novelty_peaks": top_peaks,
-        "per_second": per_second,
-    }
-
-
-def _find_valleys(rms_db, t_fine) -> list:
-    """Find deep energy valleys in the audio signal."""
-    valley_db = -40.0
-    min_valley_sec = 0.08
-    valleys = []
-    in_v, vs = False, 0
-
-    for i, db_val in enumerate(rms_db):
-        if db_val < valley_db and not in_v:
-            in_v = True
-            vs = i
-        elif db_val >= valley_db and in_v:
-            in_v = False
-            dur = t_fine[i] - t_fine[vs]
-            if dur >= min_valley_sec:
-                seg = rms_db[vs:i]
-                deepest = vs + int(np.argmin(seg))
-                t_val = float(t_fine[deepest])
-                depth = float(rms_db[deepest])
-
-                recovery_i = int(np.searchsorted(t_fine, t_val + 0.5))
-                recovery_i = min(recovery_i, len(rms_db) - 1)
-                after_chunk = rms_db[i:recovery_i]
-                recovers = (
-                    bool(np.any(after_chunk > -15.0))
-                    if len(after_chunk) > 0 else False
-                )
-
-                fade_lo = max(0, int(np.searchsorted(t_fine, t_val - 1.5)))
-                fade_seg = rms_db[fade_lo:vs]
-                if len(fade_seg) > 4:
-                    mid = len(fade_seg) // 2
-                    fade_ok = bool(
-                        np.mean(fade_seg[:mid]) > np.mean(fade_seg[mid:])
-                    )
-                else:
-                    fade_ok = True
-
-                valleys.append({
-                    "time_sec": round(t_val, 1),
-                    "time_min": f"{int(t_val // 60)}:{int(t_val % 60):02d}",
-                    "depth_db": round(depth, 1),
-                    "duration_s": round(dur, 3),
-                    "recovers": recovers,
-                    "fade_before": fade_ok,
-                    "is_candidate": recovers and depth < -42.0,
-                })
-    return valleys
-
-
-def _build_per_second(
-    total_sec, energy_per_sec, mfcc, mfcc_means, mfcc_stds,
-    chroma, chroma_peak, mel_novelty
-) -> list:
-    """Build the per-second analysis table."""
-    n_mfcc_frames = mfcc.shape[1]
-    n_chr_frames = chroma.shape[1]
-    n_mel_frames = len(mel_novelty)
-    per_second = []
-
-    for s in range(total_sec):
-        mfcc_i = min(s, n_mfcc_frames - 1)
-        chr_i = min(s, n_chr_frames - 1)
-        mel_i = min(s, n_mel_frames - 1)
-
-        if s > 0:
-            prev_i = min(s - 1, n_mfcc_frames - 1)
-            mfcc_chg = round(float(
-                np.linalg.norm(mfcc[:, mfcc_i] - mfcc[:, prev_i])
-            ), 2)
-        else:
-            mfcc_chg = 0.0
-
-        if s > 0:
-            prev_ci = min(s - 1, n_chr_frames - 1)
-            chroma_chg = round(float(
-                np.linalg.norm(chroma[:, chr_i] - chroma[:, prev_ci])
-            ), 3)
-        else:
-            chroma_chg = 0.0
-
-        per_second.append({
-            "s": s,
-            "t": f"{s // 60}:{s % 60:02d}",
-            "energy_db": energy_per_sec[s] if s < len(energy_per_sec) else 0.0,
-            "mfcc_mean": mfcc_means[mfcc_i],
-            "mfcc_std": mfcc_stds[mfcc_i],
-            "mfcc_change": mfcc_chg,
-            "chroma_key": chroma_peak[chr_i],
-            "chroma_change": chroma_chg,
-            "mel_novelty": mel_novelty[mel_i],
-        })
-    return per_second
-
-
-def _compute_novelty(per_second: list):
-    """Add combined + smoothed novelty scores to per_second rows."""
-    for row in per_second:
-        m = min(row["mfcc_change"] / 50.0, 1.0)
-        c = min(row["chroma_change"] / 3.0, 1.0)
-        n = row["mel_novelty"]
-        row["novelty"] = round((m * 0.4) + (c * 0.35) + (n * 0.25), 3)
-
-    novelty_raw = np.array([r["novelty"] for r in per_second])
-    if len(novelty_raw) > 15:
-        w = 13
-        novelty_smooth = savgol_filter(novelty_raw, window_length=w, polyorder=2)
-        novelty_smooth = np.clip(novelty_smooth, 0, None)
-        if novelty_smooth.max() > 0:
-            novelty_smooth /= novelty_smooth.max()
-        for i, row in enumerate(per_second):
-            row["novelty_smooth"] = round(float(novelty_smooth[i]), 3)
-    else:
-        for row in per_second:
-            row["novelty_smooth"] = row["novelty"]
-
-
-async def step1_analyze(audio_path: str) -> dict:
-    """Step 1: Extract audio features using librosa. Runs in thread pool."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _extract_features, audio_path)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — LLM Boundary Detection (from spliter_agent.py lines 360-912)
-# ══════════════════════════════════════════════════════════════════════════════
-
+# STEP 2 — LLM Prompt Building & API Call (Adapted to use client analysis JSON)
 def _fmt_sec(s: int) -> str:
     s = max(0, int(s))
     return f"{s // 60}:{s % 60:02d}"
 
-
 def _build_llm_prompt(analysis: dict) -> tuple[str, str]:
-    """Build system message and user prompt from analysis data."""
     meta = analysis["metadata"]
     valleys = analysis["energy_valleys"]
     candidates = analysis["strong_candidates"]
@@ -311,7 +69,7 @@ def _build_llm_prompt(analysis: dict) -> tuple[str, str]:
 
     # Valley table
     valley_lines = []
-    for v in sorted(valleys, key=lambda x: x["depth_db"]):
+    for v in sorted(valleys, key=lambda x: x.get("depth_db", 0)):
         flag = "  ★ STRONG" if v.get("is_candidate") else ""
         valley_lines.append(
             f"  {v['time_min']:>7} ({int(v['time_sec']):>5}s)"
@@ -341,7 +99,7 @@ def _build_llm_prompt(analysis: dict) -> tuple[str, str]:
 
     # Dense context around strong candidates
     context_blocks = []
-    strong = sorted(candidates, key=lambda x: x["depth_db"])[:15]
+    strong = sorted(candidates, key=lambda x: x.get("depth_db", 0))[:15]
     for v in strong:
         t = int(v["time_sec"])
         lo = max(0, t - 30)
@@ -448,31 +206,22 @@ Check EVERY segment length:
 
     return system_msg, user_prompt
 
-
 def _parse_llm_response(raw: str) -> dict | None:
-    """Try to parse the LLM JSON response with multiple fallbacks."""
-    # Direct parse
     try:
         return json.loads(raw)
     except Exception:
         pass
-
-    # Strip markdown fences
     clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
     try:
         return json.loads(clean)
     except Exception:
         pass
-
-    # Find JSON block
     match = re.search(r"\{[\s\S]*\}", clean)
     if match:
         try:
             return json.loads(match.group())
         except Exception:
             pass
-
-    # Extract cuts_seconds as last resort
     match = re.search(r'"cuts_seconds"\s*:\s*\[([^\]]+)\]', raw)
     if match:
         try:
@@ -491,14 +240,10 @@ def _parse_llm_response(raw: str) -> dict | None:
             pass
     return None
 
-
 def _validate_cuts(
     cuts: list[int], duration: float, min_sec: int, valleys: list
 ) -> list[int]:
-    """Validate and auto-fix cuts to respect segment length constraints."""
     cuts = sorted(set(int(c) for c in cuts))
-
-    # Remove invalid cuts
     valid = []
     prev = 0
     for c in cuts:
@@ -511,7 +256,6 @@ def _validate_cuts(
         valid.append(c)
         prev = c
 
-    # Auto-fix segments exceeding MAX_SONG_SEC
     changed = True
     while changed:
         changed = False
@@ -523,24 +267,22 @@ def _validate_cuts(
                 best_t = None
                 best_depth = 999.0
                 for v in valleys:
-                    t = int(v["time_sec"])
+                    t = int(v.get("time_sec", 0))
                     if seg_s + min_sec < t < seg_e - min_sec:
-                        if v["depth_db"] < best_depth:
-                            best_depth = v["depth_db"]
+                        v_depth = float(v.get("depth_db", 0))
+                        if v_depth < best_depth:
+                            best_depth = v_depth
                             best_t = t
                 if best_t is not None and best_t not in valid:
                     valid.append(best_t)
                     valid = sorted(valid)
                     changed = True
                     break
-
     return valid
-
 
 def _call_openrouter(
     system_msg: str, user_prompt: str, api_key: str
 ) -> tuple[str, str]:
-    """Call DeepSeek V4 Flash via OpenRouter. Returns (answer, reasoning)."""
     client = OpenAI(
         api_key=api_key,
         base_url=OPENROUTER_BASE_URL,
@@ -549,7 +291,6 @@ def _call_openrouter(
             "X-Title": "AudioWave Song Splitter",
         },
     )
-
     try:
         stream = client.chat.completions.create(
             model=OPENROUTER_MODEL,
@@ -575,10 +316,8 @@ def _call_openrouter(
         if not getattr(chunk, "choices", None):
             continue
         delta = chunk.choices[0].delta
-
         if hasattr(delta, "reasoning_content") and delta.reasoning_content:
             reasoning_text += delta.reasoning_content
-
         elif delta and delta.content:
             answer_text += delta.content
 
@@ -587,18 +326,14 @@ def _call_openrouter(
 
     return answer_text.strip(), reasoning_text.strip()
 
-
 async def step2_llm(
     analysis: dict, openrouter_key: str
 ) -> dict:
-    """Step 2: Call LLM for boundary detection. Runs in thread pool."""
     system_msg, user_prompt = _build_llm_prompt(analysis)
-
     loop = asyncio.get_event_loop()
     raw_text, reasoning = await loop.run_in_executor(
         None, _call_openrouter, system_msg, user_prompt, openrouter_key
     )
-
     result = _parse_llm_response(raw_text)
     if result is None:
         raise RuntimeError("Could not parse LLM response as JSON")
@@ -606,119 +341,81 @@ async def step2_llm(
     cuts = result.get("cuts_seconds", [])
     meta = analysis["metadata"]
     valleys = analysis["energy_valleys"]
-
     valid_cuts = _validate_cuts(
         cuts, meta["duration_sec"], meta["min_song_sec"], valleys
     )
-
     result["cuts_seconds"] = valid_cuts
     result["cuts_formatted"] = [_fmt_sec(c) for c in valid_cuts]
     return result
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 3 — Split Audio (from spliter_agent.py lines 920-1065)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _snap_to_energy_min(
-    cut_time: float, y, sr: int, window: float = 3.0
-) -> float:
-    """Snap a cut time to the nearest energy minimum within ±window."""
-    hop_fine = int(sr * 0.01)
-    rms = librosa.feature.rms(
-        y=y, frame_length=int(sr * 0.05), hop_length=hop_fine
-    )[0]
-    rms_db = librosa.amplitude_to_db(rms, ref=np.max)
-    t_fine = librosa.frames_to_time(
-        np.arange(len(rms_db)), sr=sr, hop_length=hop_fine
-    )
-
-    lo = max(0, int(np.searchsorted(t_fine, cut_time - window)))
-    hi = min(len(rms_db) - 1, int(np.searchsorted(t_fine, cut_time + window)))
-    if lo >= hi:
-        return cut_time
-    return float(t_fine[lo + int(np.argmin(rms_db[lo:hi]))])
-
-
-def _split_audio(
-    audio_path: str, cuts: list[int], output_dir: str
-) -> list[str]:
-    """Split audio file at cut points, export as MP3s."""
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
-    duration = librosa.get_duration(y=y, sr=sr)
-
-    # Snap cuts to energy minima
-    snapped = [_snap_to_energy_min(c, y, sr) for c in cuts]
+# STEP 3 — Split Audio via FFmpeg (0 RAM, instant stream copy)
+def _split_audio_ffmpeg(
+    audio_path: str, cuts: list[int], valleys: list, duration: float, output_dir: str
+) -> list[dict]:
+    # Snap cuts to valleys
+    snapped = [_snap_to_valley(c, valleys) for c in cuts]
     boundaries = [0.0] + sorted(snapped) + [duration]
-
     os.makedirs(output_dir, exist_ok=True)
-
-    # Load with pydub for export
-    try:
-        audio = AudioSegment.from_file(
-            audio_path, format="mp3",
-            parameters=["-err_detect", "ignore_err"]
-        )
-    except Exception:
-        audio = AudioSegment.from_file(audio_path)
-
     output_files = []
+
     for i in range(len(boundaries) - 1):
-        start_ms = int(boundaries[i] * 1000)
-        end_ms = int(boundaries[i + 1] * 1000)
-        clip = audio[start_ms:end_ms]
+        start = boundaries[i]
+        end = boundaries[i + 1]
+        seg_dur = end - start
         fname = f"song_{i + 1:02d}.mp3"
         fpath = os.path.join(output_dir, fname)
-        clip.export(fpath, format="mp3", bitrate="192k")
-        output_files.append(fpath)
-        logger.info("Exported %s (%.1fs)", fname, (end_ms - start_ms) / 1000)
+
+        # Run ffmpeg stream copy
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start:.3f}",
+            "-i", audio_path,
+            "-t", f"{seg_dur:.3f}",
+            "-c", "copy",
+            fpath
+        ]
+        logger.info("Running FFmpeg split segment %d: %s", i + 1, " ".join(cmd))
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        output_files.append({
+            "index": i,
+            "localPath": fpath,
+            "duration": round(seg_dur, 1)
+        })
 
     return output_files
 
-
 async def step3_split(
-    audio_path: str, cuts: list[int], work_dir: str
-) -> list[str]:
-    """Step 3: Split audio at cut points. Runs in thread pool."""
+    audio_path: str, cuts: list[int], valleys: list, duration: float, work_dir: str
+) -> list[dict]:
     output_dir = os.path.join(work_dir, "output_songs")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None, _split_audio, audio_path, cuts, output_dir
+        None, _split_audio_ffmpeg, audio_path, cuts, valleys, duration, output_dir
     )
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 4 — ACRCloud Song Naming (from spliter_agent.py lines 1070-1363)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _extract_clip_bytes(
-    filepath: str, skip_sec: int, clip_sec: int
-) -> bytes | None:
-    """Extract a short audio clip as WAV bytes for ACRCloud."""
+# STEP 4 — ACRCloud Song Naming (Concurrently run using asyncio)
+def _extract_clip_bytes_ffmpeg(filepath: str, skip_sec: int, clip_sec: int) -> bytes | None:
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(skip_sec),
+        "-i", filepath,
+        "-t", str(clip_sec),
+        "-ar", "16000",
+        "-ac", "1",
+        "-f", "wav",
+        "-"
+    ]
     try:
-        audio = AudioSegment.from_file(filepath)
-        skip_ms = skip_sec * 1000
-        clip_ms = clip_sec * 1000
-        clip = audio[skip_ms : skip_ms + clip_ms]
-        if len(clip) < 2000:
-            clip = audio[:clip_ms]
-        if len(clip) < 1000:
-            return None
-        clip = clip.set_channels(1).set_frame_rate(16000)
-        # Export to bytes buffer
-        import io
-        buf = io.BytesIO()
-        clip.export(buf, format="wav")
-        return buf.getvalue()
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode == 0:
+            return res.stdout
     except Exception as exc:
-        logger.warning("Clip extraction failed: %s", exc)
-        return None
-
+        logger.warning("ffmpeg clip extraction failed: %s", exc)
+    return None
 
 def _call_acrcloud(
     audio_bytes: bytes, acr_host: str, acr_key: str, acr_secret: str
 ) -> dict:
-    """Send audio to ACRCloud REST API for recognition."""
     http_method = "POST"
     http_uri = "/v1/identify"
     data_type = "audio"
@@ -729,7 +426,6 @@ def _call_acrcloud(
         http_method + "\n" + http_uri + "\n" + acr_key + "\n"
         + data_type + "\n" + signature_version + "\n" + timestamp
     )
-
     signature = base64.b64encode(
         hmac.new(
             acr_secret.encode("ascii"),
@@ -759,9 +455,7 @@ def _call_acrcloud(
     except Exception as exc:
         return {"status": {"code": -1, "msg": str(exc)}}
 
-
 def _parse_acr_response(response: dict) -> tuple[str | None, str | None]:
-    """Parse ACRCloud response to extract title and artist."""
     if not response:
         return None, None
     code = response.get("status", {}).get("code", -1)
@@ -776,82 +470,80 @@ def _parse_acr_response(response: dict) -> tuple[str | None, str | None]:
     except (KeyError, IndexError):
         return None, None
 
-
 def _safe_filename(name: str) -> str:
-    """Sanitize a string for use as a filename."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
     name = re.sub(r"\s+", "_", name.strip()).strip("._")
     return name[:80] if name else "Unknown"
 
-
-def _name_songs(
-    song_files: list[str],
+async def _recognize_single_song(
+    idx: int,
+    filepath: str,
+    duration_sec: float,
     acr_host: str,
     acr_key: str,
     acr_secret: str,
-) -> list[dict]:
-    """Run ACRCloud recognition on each song file."""
-    results = []
+) -> dict:
+    loop = asyncio.get_event_loop()
+    display_name = f"Unidentified Song {idx + 1:02d}"
+    recognized = False
 
-    for idx, filepath in enumerate(song_files):
-        audio = AudioSegment.from_file(filepath)
-        duration_sec = round(len(audio) / 1000.0, 1)
-        display_name = f"Unidentified Song {idx + 1:02d}"
-        recognized = False
+    for skip in ACR_SKIP_OFFSETS:
+        if duration_sec < skip + 3:
+            continue
+        audio_bytes = await loop.run_in_executor(
+            None, _extract_clip_bytes_ffmpeg, filepath, skip, ACR_CLIP_SECONDS
+        )
+        if audio_bytes is None:
+            continue
 
-        for skip in ACR_SKIP_OFFSETS:
-            audio_bytes = _extract_clip_bytes(filepath, skip, ACR_CLIP_SECONDS)
-            if audio_bytes is None:
-                continue
+        response = await loop.run_in_executor(
+            None, _call_acrcloud, audio_bytes, acr_host, acr_key, acr_secret
+        )
+        status_code = response.get("status", {}).get("code", -1)
+        if status_code == 3003:
+            raise ACRLimitExceeded("ACRCloud trial limit exceeded")
+        elif status_code in (2004, 3000, 3015):
+            raise ACRInvalidCredentials(f"ACRCloud credentials are invalid or misconfigured (error {status_code}).")
 
-            response = _call_acrcloud(audio_bytes, acr_host, acr_key, acr_secret)
+        title, artist = _parse_acr_response(response)
+        if title:
+            display_name = _safe_filename(title)
+            recognized = True
+            logger.info("Recognized: %s — %s", title, artist or "Unknown")
+            break
 
-            # Check for trial limit exceeded
-            status_code = response.get("status", {}).get("code", -1)
-            if status_code == 3003:
-                raise ACRLimitExceeded("ACRCloud trial limit exceeded")
-            elif status_code in (2004, 3000, 3015):
-                raise ACRInvalidCredentials(f"ACRCloud credentials are invalid or misconfigured (error {status_code}).")
+        await asyncio.sleep(0.2)
 
-            title, artist = _parse_acr_response(response)
-            if title:
-                display_name = _safe_filename(title)
-                recognized = True
-                logger.info("Recognized: %s — %s", title, artist or "Unknown")
-                break
-
-            time.sleep(0.5)
-
-        results.append({
-            "index": idx,
-            "displayName": display_name,
-            "duration": duration_sec,
-            "recognized": recognized,
-            "localPath": filepath,
-        })
-
-        time.sleep(1.0)
-
-    return results
-
+    return {
+        "index": idx,
+        "displayName": display_name,
+        "duration": duration_sec,
+        "recognized": recognized,
+        "localPath": filepath,
+    }
 
 async def step4_name(
-    song_files: list[str],
+    song_info_list: list[dict],
     acr_host: str,
     acr_key: str,
     acr_secret: str,
 ) -> list[dict]:
-    """Step 4: Name songs via ACRCloud. Runs in thread pool."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, _name_songs, song_files, acr_host, acr_key, acr_secret
-    )
+    """Step 4: Name songs via ACRCloud in parallel."""
+    tasks = []
+    for info in song_info_list:
+        tasks.append(
+            _recognize_single_song(
+                idx=info["index"],
+                filepath=info["localPath"],
+                duration_sec=info["duration"],
+                acr_host=acr_host,
+                acr_key=acr_key,
+                acr_secret=acr_secret,
+            )
+        )
+    return await asyncio.gather(*tasks)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
 # PIPELINE ORCHESTRATOR
-# ══════════════════════════════════════════════════════════════════════════════
-
 async def run_pipeline(
     audio_path: str,
     uid: str,
@@ -861,34 +553,29 @@ async def run_pipeline(
     acr_secret: str,
     work_dir: str,
     job_id: str = None,
+    analysis: dict = None,
 ) -> AsyncGenerator[dict, None]:
-    """
-    Run the full 4-step pipeline, yielding SSE event dicts at each stage.
-
-    Events yielded:
-      {"step": "analyzing", "message": "Analyzing your audio file..."}
-      {"step": "thinking", "elapsed": N}
-      {"step": "saving", "message": "Saving individual files..."}
-      {"step": "naming", "message": "Naming your songs..."}
-      {"step": "complete", "jobId": "...", "files": [...]}
-      {"step": "error", "error_type": "...", "message": "..."}
-    """
     if job_id is None:
         job_id = f"{uid}_job_{int(time.time())}"
 
+    if analysis is None:
+        yield {
+            "step": "error",
+            "error_type": "general",
+            "message": "Missing audio analysis data from client.",
+        }
+        return
+
     try:
-        # ── Step 1: Analyze ──
+        # ── Step 1: Analyze (Bypassed since client did it) ──
         yield {"step": "analyzing", "message": "Analyzing your audio file..."}
-        analysis = await step1_analyze(audio_path)
-        logger.info("Step 1 complete: %d seconds analyzed",
-                     len(analysis["per_second"]))
+        # Yield a tiny sleep to simulate phase change
+        await asyncio.sleep(0.5)
 
         # ── Step 2: LLM ──
-        # Start yielding "thinking" events with elapsed time
         think_start = time.time()
         yield {"step": "thinking", "elapsed": 0}
 
-        # Run LLM in background, yield elapsed ticks
         llm_task = asyncio.create_task(
             step2_llm(analysis, openrouter_key)
         )
@@ -904,7 +591,9 @@ async def run_pipeline(
 
         # ── Step 3: Split ──
         yield {"step": "saving", "message": "Saving individual files..."}
-        song_files = await step3_split(audio_path, cuts, work_dir)
+        valleys = analysis.get("energy_valleys", [])
+        duration = float(analysis["metadata"]["duration_sec"])
+        song_files = await step3_split(audio_path, cuts, valleys, duration, work_dir)
         logger.info("Step 3 complete: %d files created", len(song_files))
 
         # ── Step 4: Name ──

@@ -12,7 +12,7 @@ import uuid
 
 import magic
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -428,47 +428,50 @@ def get_user_keys(uid: str) -> dict:
         raise HTTPException(500, "Failed to load your API keys. Please try again.")
 
 
-# ── Upload split files to Cloudinary ───────────────────────────────────────────
+# ── Upload split files to Cloudinary in Parallel ─────────────────────────────
 
-def upload_to_cloudinary(
+def _upload_single_file(file_info: dict, uid: str, job_id: str) -> dict:
+    local_path = file_info.get("localPath", "")
+    display_name = file_info.get("displayName", f"song_{file_info['index'] + 1:02d}")
+    public_id = f"audiowave/{uid}/{job_id}/{display_name}"
+    try:
+        result = cloudinary.uploader.upload(
+            local_path,
+            resource_type="video",
+            public_id=public_id,
+            overwrite=True,
+        )
+        return {
+            "index": file_info["index"],
+            "displayName": display_name,
+            "cloudinaryUrl": result.get("secure_url", ""),
+            "cloudinaryPublicId": result.get("public_id", public_id),
+            "duration": file_info.get("duration", 0),
+            "recognized": file_info.get("recognized", False),
+        }
+    except Exception as exc:
+        logger.exception("Cloudinary upload failed for %s", display_name)
+        return {
+            "index": file_info["index"],
+            "displayName": display_name,
+            "cloudinaryUrl": "",
+            "cloudinaryPublicId": public_id,
+            "duration": file_info.get("duration", 0),
+            "recognized": file_info.get("recognized", False),
+        }
+
+async def upload_to_cloudinary_async(
     file_results: list, uid: str, job_id: str
 ) -> list:
-    """Upload each split song to Cloudinary. Returns list of file dicts."""
+    """Upload each split song to Cloudinary in parallel."""
+    loop = asyncio.get_event_loop()
     get_active_cloudinary()
-    uploaded_files = []
-
-    for file_info in file_results:
-        local_path = file_info.get("localPath", "")
-        display_name = file_info.get("displayName", f"song_{file_info['index'] + 1:02d}")
-        public_id = f"audiowave/{uid}/{job_id}/{display_name}"
-
-        try:
-            result = cloudinary.uploader.upload(
-                local_path,
-                resource_type="video",
-                public_id=public_id,
-                overwrite=True,
-            )
-            uploaded_files.append({
-                "index": file_info["index"],
-                "displayName": display_name,
-                "cloudinaryUrl": result.get("secure_url", ""),
-                "cloudinaryPublicId": result.get("public_id", public_id),
-                "duration": file_info.get("duration", 0),
-                "recognized": file_info.get("recognized", False),
-            })
-        except Exception as exc:
-            logger.exception("Cloudinary upload failed for %s", display_name)
-            uploaded_files.append({
-                "index": file_info["index"],
-                "displayName": display_name,
-                "cloudinaryUrl": "",
-                "cloudinaryPublicId": public_id,
-                "duration": file_info.get("duration", 0),
-                "recognized": file_info.get("recognized", False),
-            })
-
-    return uploaded_files
+    tasks = []
+    for info in file_results:
+        tasks.append(
+            loop.run_in_executor(None, _upload_single_file, info, uid, job_id)
+        )
+    return await asyncio.gather(*tasks)
 
 
 # ── POST /api/process — Main processing endpoint ──────────────────────────────
@@ -478,9 +481,15 @@ def upload_to_cloudinary(
 async def process_audio(
     request: Request,
     file: UploadFile = File(...),
+    analysis: str = Form(...),
     uid: str = Depends(get_current_uid),
 ):
     """Upload audio file, run the 4-step pipeline, stream SSE progress events."""
+    try:
+        analysis_json = json.loads(analysis)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid analysis JSON format.")
+
     # Validate the uploaded file
     content = await validate_upload(file)
 
@@ -528,6 +537,7 @@ async def process_audio(
                 acr_secret=user_keys["acr_secret_key"],
                 work_dir=work_dir,
                 job_id=job_id,
+                analysis=analysis_json,
             ):
                 step = event.get("step", "")
 
@@ -535,7 +545,7 @@ async def process_audio(
                     # Upload split files to Cloudinary
                     pipeline_files = event.get("files", [])
                     try:
-                        uploaded = upload_to_cloudinary(
+                        uploaded = await upload_to_cloudinary_async(
                             pipeline_files, uid, event.get("jobId", job_id)
                         )
                         final_files = uploaded

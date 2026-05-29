@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { wakeupServer, streamProcess, ProcessingEvent } from "@/lib/api";
+import { analyzeAudioFile } from "@/lib/audioAnalyzer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -234,6 +235,7 @@ export default function GeneratorProcessingPage() {
   const [processingDone, setProcessingDone] = useState(false);
   const [showPreviewWarning, setShowPreviewWarning] = useState(false);
 
+  const [analysisStatus, setAnalysisStatus] = useState<string | null>(null);
   const thinkingAddedRef = useRef(false);
   const pipelineStartedRef = useRef(false);
 
@@ -301,12 +303,22 @@ export default function GeneratorProcessingPage() {
     pipelineStartedRef.current = true;
 
     const run = async () => {
-      await wakeupServer();
-      setIsWaking(false);
-      setIsUploading(true);
       try {
-        await streamProcess(selectedFile, handleSseEvent);
+        await wakeupServer();
+        setIsWaking(false);
+
+        // 1. Run local audio analysis using client RAM and CPU
+        const analysisResult = await analyzeAudioFile(selectedFile, (status) => {
+          setAnalysisStatus(status);
+        });
+        setAnalysisStatus(null);
+
+        // 2. Start file upload + streaming process
+        setIsUploading(true);
+        await streamProcess(selectedFile, analysisResult, handleSseEvent);
       } catch (err) {
+        setAnalysisStatus(null);
+        setIsWaking(false);
         setIsUploading(false);
         setShowTyping(false);
         setErrorType("general");
@@ -364,6 +376,33 @@ export default function GeneratorProcessingPage() {
                 <p className="font-body text-sm text-[var(--text-primary)]">
                   Waking up the server…{" "}
                   <span className="text-[var(--text-muted)]">(~30 seconds)</span>
+                </p>
+                <div className="flex gap-1.5 mt-2">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 bg-[var(--accent-cyan)] rounded-full"
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.3 }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {analysisStatus && (
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="flex items-start gap-4 p-5 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl backdrop-blur-md"
+            >
+              <span className="text-2xl flex-shrink-0 mt-0.5">⚙️</span>
+              <div className="flex-1">
+                <p className="font-body text-sm text-[var(--text-primary)]">
+                  {analysisStatus}{" "}
+                  <span className="text-[var(--text-muted)]">(using your local PC RAM & CPU)</span>
                 </p>
                 <div className="flex gap-1.5 mt-2">
                   {[0, 1, 2].map((i) => (
