@@ -104,16 +104,13 @@ function bufferToWavBlob(buffer: AudioBuffer): Blob {
 // ─── Toolbar Button ───────────────────────────────────────────────────────────
 
 function ToolbarBtn({
-  icon, label, onClick, disabled, disabledReason, delay = 0,
+  icon, label, onClick, disabled, disabledReason, delay = 0, onShowBlockedMsg,
 }: {
-  icon: string; label: string; onClick: () => void; disabled?: boolean; disabledReason?: string; delay?: number;
+  icon: string; label: string; onClick: () => void; disabled?: boolean; disabledReason?: string; delay?: number; onShowBlockedMsg?: (msg: string) => void;
 }) {
-  const [showHint, setShowHint] = React.useState(false);
-
   const handleClick = () => {
     if (disabled && disabledReason) {
-      setShowHint(true);
-      setTimeout(() => setShowHint(false), 2500);
+      onShowBlockedMsg?.(disabledReason);
       return;
     }
     if (!disabled) onClick();
@@ -148,22 +145,6 @@ function ToolbarBtn({
           {disabled && disabledReason ? disabledReason : label}
         </div>
       </div>
-      {/* Click hint toast for disabled buttons */}
-      <AnimatePresence>
-        {showHint && disabledReason && (
-          <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)] px-3 py-2 rounded-xl shadow-xl w-max max-w-[220px]"
-          >
-            <p className="font-body text-[11px] text-[var(--error)] text-center leading-snug">
-              {disabledReason}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -238,10 +219,18 @@ function SegmentOverlay({ segment, index, duration, selected, onClick }: {
   const borders = ["rgba(0,212,255,0.4)", "rgba(139,92,246,0.4)", "rgba(34,197,94,0.35)", "rgba(251,146,60,0.35)"];
   const ci = index % colors.length;
   return (
-    <div onClick={onClick} className="absolute top-0 h-full cursor-pointer border-l-2"
+    <div className="absolute top-0 h-full pointer-events-none border-l-2"
       style={{ left: `${leftPct}%`, width: `${widthPct}%`, background: selected ? colors[ci] : "transparent", borderColor: borders[ci] }}
       title={segment.name}>
-      <span className="absolute top-1 left-1 font-mono text-[9px] text-white/50 pointer-events-none truncate max-w-[80%]">{segment.name}</span>
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick(e);
+        }}
+        className="absolute top-1.5 left-1.5 font-mono text-[10px] text-white/90 bg-[rgba(26,26,26,0.85)] hover:bg-[rgba(0,212,255,0.25)] border border-[rgba(255,255,255,0.15)] hover:border-[rgba(0,212,255,0.5)] px-2 py-0.5 rounded-md cursor-pointer pointer-events-auto select-none transition truncate max-w-[90%] shadow-lg"
+      >
+        {segment.name}
+      </span>
     </div>
   );
 }
@@ -292,6 +281,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   // Counter to force WaveSurfer recreation even if blob identity is tricky
   const [waveVersion, setWaveVersion] = useState(0);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [blockedActionMsg, setBlockedActionMsg] = useState<string | null>(null);
 
   // Manage beginner tooltip sequence transitions
   useEffect(() => {
@@ -325,6 +315,18 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const wavesurferRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const lastAnchorIdx = useRef<number>(0); // Anchor index for Shift range selection
+
+  const handleSeekOffset = useCallback((offset: number) => {
+    if (!wavesurferRef.current) return;
+    const currentTime = wavesurferRef.current.getCurrentTime();
+    let targetTime = currentTime + offset;
+    if (targetTime < 0) targetTime = 0;
+    if (targetTime > duration) targetTime = duration;
+    wavesurferRef.current.setTime(targetTime);
+    wavesurferRef.current.pause();
+    setIsPlaying(false);
+    setCursorTime(targetTime);
+  }, [duration]);
 
   // ── Load initial URL (from generator/editor) ─────────────────────────────────
 
@@ -1017,7 +1019,8 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               <ToolbarBtn icon="✂️" label="Cut" onClick={handleCut}
                 disabled={!waveReady || cursorTime <= 0 || cursorTime >= duration}
                 disabledReason={!waveReady ? "Wait for audio to load" : "Click the waveform to place cursor first"}
-                delay={0.05} />
+                delay={0.05}
+                onShowBlockedMsg={setBlockedActionMsg} />
               {tooltipStep === 2 && (
                 <AnimatePresence>
                   <motion.div
@@ -1037,31 +1040,105 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
             <ToolbarBtn icon="🔗" label="Merge" onClick={handleMerge}
               disabled={!waveReady || selectedIds.size < 2}
               disabledReason={!waveReady ? "Wait for audio to load" : "Select 2+ segments (Ctrl+Click or Shift+Click)"}
-              delay={0.1} />
+              delay={0.1}
+              onShowBlockedMsg={setBlockedActionMsg} />
             <ToolbarBtn icon="➕" label="Add File" onClick={() => addFileInputRef.current?.click()}
               disabled={!waveReady}
               disabledReason="Wait for audio to load"
-              delay={0.15} />
+              delay={0.15}
+              onShowBlockedMsg={setBlockedActionMsg} />
             <ToolbarBtn icon="✏️" label="Rename"
               onClick={() => { const id = Array.from(selectedIds)[0]; if (id) startEdit(id); }}
               disabled={!waveReady || selectedIds.size !== 1}
               disabledReason={!waveReady ? "Wait for audio to load" : selectedIds.size === 0 ? "Click a segment first" : "Select only 1 segment to rename"}
-              delay={0.2} />
+              delay={0.2}
+              onShowBlockedMsg={setBlockedActionMsg} />
             <div className="w-px h-8 bg-[var(--glass-border)] mx-1 flex-shrink-0" />
             <ToolbarBtn icon="⬇️" label="Download Selected" onClick={downloadSelected}
               disabled={!waveReady || !selectedIds.size}
               disabledReason={!waveReady ? "Wait for audio to load" : "Select segments to download"}
-              delay={0.25} />
+              delay={0.25}
+              onShowBlockedMsg={setBlockedActionMsg} />
             <ToolbarBtn icon="🗜️" label="Download All" onClick={downloadAll}
               disabled={!waveReady || !segments.length}
               disabledReason="Wait for audio to load"
-              delay={0.3} />
+              delay={0.3}
+              onShowBlockedMsg={setBlockedActionMsg} />
             <div className="w-px h-8 bg-[var(--glass-border)] mx-1 flex-shrink-0" />
             <ToolbarBtn icon="↩️" label="Undo" onClick={handleUndo}
               disabled={!undoStack.length}
               disabledReason="Nothing to undo"
-              delay={0.35} />
-            <div className="flex-1" />
+              delay={0.35}
+              onShowBlockedMsg={setBlockedActionMsg} />
+            
+            {/* Center-aligned Playback Seek Button Group */}
+            <div className="flex-1 flex justify-center items-center gap-1 mx-4 min-w-[280px]">
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(-10)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Rewind 10s & Pause"
+              >
+                ⏪ 10s
+              </button>
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(-5)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Rewind 5s & Pause"
+              >
+                ⏪ 5s
+              </button>
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(-1)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Rewind 1s & Pause"
+              >
+                ⏪ 1s
+              </button>
+              
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={handlePlayPause}
+                className="w-9 h-9 rounded-full bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.08)] border border-[var(--glass-border)] hover:border-[var(--accent-cyan)] flex items-center justify-center text-xs text-[var(--text-primary)] hover:scale-105 active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? "⏸" : "▶"}
+              </button>
+
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(1)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Forward 1s & Pause"
+              >
+                1s ⏩
+              </button>
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(5)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Forward 5s & Pause"
+              >
+                5s ⏩
+              </button>
+              <button
+                type="button"
+                disabled={!waveReady}
+                onClick={() => handleSeekOffset(10)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--glass-border)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] active:scale-95 transition disabled:opacity-30 disabled:pointer-events-none"
+                title="Forward 10s & Pause"
+              >
+                10s ⏩
+              </button>
+            </div>
             <button onClick={() => {
               if (stableStorageKeyRef.current) {
                 sessionStorage.removeItem(stableStorageKeyRef.current);
@@ -1202,6 +1279,46 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
                 className="mt-6 w-full py-3 font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:scale-[1.02] active:scale-[0.98] transition transform"
               >
                 Close Guide
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Blocked Action Modal Pop-up */}
+      <AnimatePresence>
+        {blockedActionMsg && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <div
+              className="absolute inset-0"
+              onClick={() => setBlockedActionMsg(null)}
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              className="relative z-10 bg-[var(--bg-surface)] border border-[rgba(239,68,68,0.25)] rounded-2xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center text-center"
+            >
+              <div className="w-12 h-12 rounded-full bg-[rgba(239,68,68,0.1)] flex items-center justify-center border border-[rgba(239,68,68,0.25)] text-[var(--error)] mb-4 text-xl">
+                ⚠️
+              </div>
+              <h3 className="font-heading text-base font-bold text-[var(--text-primary)] mb-2">
+                Action Blocked
+              </h3>
+              <p className="font-body text-xs text-[var(--text-secondary)] leading-relaxed mb-6">
+                {blockedActionMsg}
+              </p>
+              <button
+                onClick={() => setBlockedActionMsg(null)}
+                className="w-full py-2.5 px-4 rounded-xl border border-[var(--glass-border)] text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] transition"
+              >
+                Close
               </button>
             </motion.div>
           </motion.div>
