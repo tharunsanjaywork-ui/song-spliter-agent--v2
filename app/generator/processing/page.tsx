@@ -123,15 +123,18 @@ function MessageCard({
 
 function ErrorModal({
   errorType,
+  customMessage,
   onCancel,
   onContinue,
 }: {
   errorType: ErrorType;
+  customMessage: string | null;
   onCancel: () => void;
   onContinue: () => void;
 }) {
   const content = ERROR_CONTENT[errorType];
   const showContinue = errorType !== "general";
+  const bodyText = (errorType === "general" && customMessage) ? customMessage : content.body;
 
   return (
     <motion.div
@@ -153,7 +156,7 @@ function ErrorModal({
           {content.title}
         </h3>
         <p className="font-body text-sm text-[var(--text-secondary)] leading-relaxed mb-6">
-          {content.body}
+          {bodyText}
         </p>
         <div className="flex gap-3">
           <button
@@ -224,7 +227,9 @@ export default function GeneratorProcessingPage() {
   const [thinkingSeconds, setThinkingSeconds] = useState(0);
   const [showTyping, setShowTyping] = useState(false);
   const [isWaking, setIsWaking] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
   const [errorType, setErrorType] = useState<ErrorType | null>(null);
+  const [customErrorMsg, setCustomErrorMsg] = useState<string | null>(null);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [processingDone, setProcessingDone] = useState(false);
   const [showPreviewWarning, setShowPreviewWarning] = useState(false);
@@ -241,6 +246,7 @@ export default function GeneratorProcessingPage() {
 
   const handleSseEvent = useCallback(
     (event: ProcessingEvent) => {
+      setIsUploading(false);
       switch (event.step) {
         case "analyzing":
           setIsWaking(false);
@@ -276,6 +282,7 @@ export default function GeneratorProcessingPage() {
           setShowTyping(false);
           setIsWaking(false);
           setErrorType((event.error_type as ErrorType) ?? "general");
+          setCustomErrorMsg(event.message ?? null);
           setShowErrorModal(true);
           break;
       }
@@ -296,11 +303,14 @@ export default function GeneratorProcessingPage() {
     const run = async () => {
       await wakeupServer();
       setIsWaking(false);
+      setIsUploading(true);
       try {
         await streamProcess(selectedFile, handleSseEvent);
-      } catch {
+      } catch (err) {
+        setIsUploading(false);
         setShowTyping(false);
         setErrorType("general");
+        setCustomErrorMsg(err instanceof Error ? err.message : "Something went wrong on the server.");
         setShowErrorModal(true);
       }
     };
@@ -369,6 +379,33 @@ export default function GeneratorProcessingPage() {
             </motion.div>
           )}
 
+          {isUploading && (
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="flex items-start gap-4 p-5 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl backdrop-blur-md"
+            >
+              <span className="text-2xl flex-shrink-0 mt-0.5">📤</span>
+              <div className="flex-1">
+                <p className="font-body text-sm text-[var(--text-primary)]">
+                  Uploading your audio file…{" "}
+                  <span className="text-[var(--text-muted)]">(Please don&apos;t close this page)</span>
+                </p>
+                <div className="flex gap-1.5 mt-2">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 bg-[var(--accent-cyan)] rounded-full"
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.3 }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {messages.map((msg) => (
             <MessageCard
               key={msg.id}
@@ -405,6 +442,7 @@ export default function GeneratorProcessingPage() {
         {showErrorModal && errorType && (
           <ErrorModal
             errorType={errorType}
+            customMessage={customErrorMsg}
             onCancel={handleErrorCancel}
             onContinue={handleErrorContinue}
           />

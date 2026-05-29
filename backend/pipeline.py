@@ -39,6 +39,11 @@ class ACRLimitExceeded(Exception):
     pass
 
 
+class ACRInvalidCredentials(Exception):
+    """ACRCloud signature or credential verification failed."""
+    pass
+
+
 class OpenRouterLimitExceeded(Exception):
     """OpenRouter 402 or insufficient balance error."""
     pass
@@ -67,7 +72,7 @@ def _extract_features(audio_path: str) -> dict:
     novelty peaks, and per-second table.
     """
     logger.info("Step 1: Loading audio file %s", audio_path)
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    y, sr = librosa.load(audio_path, sr=16000, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
     total_sec = int(duration)
     target_songs = max(2, round(duration / (AVG_SONG_MIN * 60)))
@@ -102,7 +107,7 @@ def _extract_features(audio_path: str) -> dict:
     ]
 
     # Chroma at 1s resolution
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_1s)
+    chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop_1s)
     chroma_peak = [
         int(np.argmax(chroma[:, i])) for i in range(chroma.shape[1])
     ]
@@ -805,6 +810,8 @@ def _name_songs(
             status_code = response.get("status", {}).get("code", -1)
             if status_code == 3003:
                 raise ACRLimitExceeded("ACRCloud trial limit exceeded")
+            elif status_code in (2004, 3000, 3015):
+                raise ACRInvalidCredentials(f"ACRCloud credentials are invalid or misconfigured (error {status_code}).")
 
             title, artist = _parse_acr_response(response)
             if title:
@@ -916,14 +923,29 @@ async def run_pipeline(
         logger.warning("ACRCloud limit exceeded for user %s", uid)
         yield {"step": "error", "error_type": "acr_limit_exceeded"}
 
+    except ACRInvalidCredentials as exc:
+        logger.warning("ACRCloud credentials invalid for user %s: %s", uid, exc)
+        yield {
+            "step": "error",
+            "error_type": "general",
+            "message": "ACRCloud credentials verification failed. Please check your ACR Host, Access Key, and Secret Key in the Setup Guide."
+        }
+
     except OpenRouterLimitExceeded:
         logger.warning("OpenRouter limit exceeded for user %s", uid)
         yield {"step": "error", "error_type": "openrouter_limit_exceeded"}
 
     except Exception as exc:
         logger.exception("Pipeline error for user %s: %s", uid, exc)
+        err_msg = str(exc)
+        if "401" in err_msg or "unauthorized" in err_msg.lower() or "invalid api key" in err_msg.lower():
+            msg = "OpenRouter authentication failed. Please verify your OpenRouter API key in the Setup Guide."
+        elif "authentication" in err_msg.lower() or "credentials" in err_msg.lower():
+            msg = "Authentication failed. Please check your API keys."
+        else:
+            msg = f"Something went wrong on the server: {err_msg}"
         yield {
             "step": "error",
             "error_type": "general",
-            "message": "Something went wrong on the server.",
+            "message": msg,
         }

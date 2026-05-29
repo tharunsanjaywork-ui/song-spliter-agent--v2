@@ -179,18 +179,43 @@ export async function streamProcess(
     body: formData,
   });
 
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
+    let errorMsg = "Failed to connect to the processing server.";
+    try {
+      const errorJson = await response.json();
+      if (errorJson && errorJson.error) {
+        errorMsg = errorJson.error;
+      }
+    } catch {
+      // not JSON
+    }
+    throw new Error(errorMsg);
+  }
+
+  if (!response.body) {
     throw new Error("Failed to connect to the processing server.");
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let receivedEndEvent = false;
+
+  const handleEventWrapped = (event: ProcessingEvent) => {
+    if (event.step === "complete" || event.step === "error") {
+      receivedEndEvent = true;
+    }
+    onEvent(event);
+  };
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    buffer = parseSseBuffer(buffer, onEvent);
+    buffer = parseSseBuffer(buffer, handleEventWrapped);
+  }
+
+  if (!receivedEndEvent) {
+    throw new Error("Connection lost. The server might be busy or crashed. Please try again later.");
   }
 }

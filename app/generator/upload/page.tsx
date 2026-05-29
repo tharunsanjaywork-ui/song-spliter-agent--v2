@@ -6,7 +6,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { useAuth } from "@/hooks/useAuth";
-import { getKeysStatus, wakeupServer } from "@/lib/api";
+import { wakeupServer } from "@/lib/api";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -217,8 +219,11 @@ export default function GeneratorUploadPage() {
 
     const checkStatusAndWakeup = async () => {
       try {
-        const response = await getKeysStatus();
-        if (!response.success || !response.setupComplete) {
+        // Client-side Firestore check — no backend cold start needed
+        const userDocRef = doc(db, "users", user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        const setupComplete = userDocSnap.exists() ? userDocSnap.data()?.setupComplete : false;
+        if (!setupComplete) {
           router.push("/generator/setup");
           return;
         }
