@@ -218,52 +218,52 @@ function GeneratorSetupPage() {
   const acoustidSteps = [
     {
       id: 1,
-      title: "Open AcoustID Applications Manager",
+      title: "Sign Up / Log In on AcoustID",
       desc: (
         <span>
-          Click this link to open the AcoustID applications page:{" "}
+          Click this link to open the AcoustID page:{" "}
           <a
-            href="https://acoustid.org/my-applications"
+            href="https://acoustid.org/login"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[var(--accent-cyan)] underline hover:text-cyan-300 font-semibold"
           >
-            https://acoustid.org/my-applications
+            https://acoustid.org/login
           </a>{" "}
-          and sign in.
+          and sign up for an account. AcoustID uses MusicBrainz for login authentication, so if you do not have one, you can register a new MusicBrainz account there.
         </span>
       ),
-      image: null,
+      image: "step1_ Acoust.png",
     },
     {
       id: 2,
-      title: "Log In using MusicBrainz",
+      title: "Return and Click Registration Link",
       desc: (
         <span>
-          Sign in using your free MusicBrainz account. If you do not have one, you can register quickly at{" "}
+          After signing up, return to this page and click this link to open the application registration page:{" "}
           <a
-            href="https://musicbrainz.org/register"
+            href="https://acoustid.org/new-application"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[var(--accent-cyan)] underline hover:text-cyan-300 font-semibold"
           >
-            https://musicbrainz.org/register
+            https://acoustid.org/new-application
           </a>.
         </span>
       ),
-      image: null,
+      image: "step2_ Acoust.png",
     },
     {
       id: 3,
-      title: "Register a New Application",
-      desc: "Click the 'Register application' button. Enter a name (e.g. 'AudioWave Splitter'), provide a brief description, and submit the form.",
-      image: null,
+      title: "Register Application Details",
+      desc: "Fill out the registration form with any details you like (e.g., Application name: 'AudioWave Splitter'), and make sure to provide your original Gmail ID.",
+      image: "step3_ Acoust.png",
     },
     {
       id: 4,
-      title: "Copy the Client API Key",
-      desc: "Once your application is registered, copy the generated Client API Key (e.g., 'FNXfrDqZeY') and paste it in the input field below to complete the setup.",
-      image: null,
+      title: "Copy and Paste the Client API Key",
+      desc: "After submitting, copy your generated AcoustID Client API Key and paste it in the input field below to complete your setup.",
+      image: "step4_ Acoust.png",
     },
   ];
 
@@ -322,8 +322,8 @@ function GeneratorSetupPage() {
           {/* Floating Progress Pill */}
           <div className="px-3.5 py-1.5 rounded-full bg-[var(--glass-bg)] border border-[var(--glass-border)] text-xs font-heading font-bold text-[var(--accent-cyan)] shadow-[0_0_15px_rgba(0,212,255,0.05)]">
             {section === "openrouter"
-              ? `OpenRouter: Step ${activeStep} of ${totalSteps}`
-              : `ACRCloud: Step ${activeStep} of ${totalSteps}`}
+               ? `OpenRouter: Step ${activeStep} of ${totalSteps}`
+               : `AcoustID: Step ${activeStep} of ${totalSteps}`}
           </div>
         </div>
 
@@ -343,12 +343,12 @@ function GeneratorSetupPage() {
       <main ref={sectionTopRef} className="flex-1 max-w-3xl mx-auto w-full px-4 py-8 z-10">
         <div className="text-center mb-10">
           <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent mb-3">
-            {section === "openrouter" ? "OpenRouter Credentials" : "ACRCloud Credentials"}
+            {section === "openrouter" ? "OpenRouter Credentials" : "AcoustID Credentials"}
           </h1>
           <p className="font-body text-sm text-[var(--text-secondary)] max-w-lg mx-auto">
             {section === "openrouter"
               ? "Follow these steps to obtain a free OpenRouter API key so the AI can split your mixtapes."
-              : "Follow these steps to configure a free ACRCloud project and retrieve keys to identify Tamil song titles."}
+              : "Follow these steps to register a free AcoustID application and retrieve Client API key to identify Tamil song titles."}
           </p>
         </div>
 
