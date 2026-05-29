@@ -485,20 +485,31 @@ export default function GeneratorProcessingPage() {
             </motion.div>
           )}
 
-          <AnimatePresence>
-            {processingDone && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.4 }}
-                onClick={() => setShowPreviewWarning(true)}
-                className="mt-4 w-full py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_25px_rgba(0,212,255,0.35)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200 flex items-center justify-center gap-3"
-              >
-                <span className="text-xl">🎵</span>
-                <span>Preview Songs</span>
-              </motion.button>
-            )}
-          </AnimatePresence>
+          <div className="mt-6 flex flex-col gap-3 w-full">
+            <AnimatePresence mode="wait">
+              {processingDone ? (
+                <motion.button
+                  key="preview-btn"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  onClick={() => setShowPreviewWarning(true)}
+                  className="w-full py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_25px_rgba(0,212,255,0.35)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200 flex items-center justify-center gap-3"
+                >
+                  <span className="text-xl">🎵</span>
+                  <span>Preview Songs</span>
+                </motion.button>
+              ) : null}
+            </AnimatePresence>
+
+            <button
+              onClick={() => router.push("/generator/upload")}
+              className="w-full py-3.5 font-body text-sm font-semibold border border-[rgba(255,255,255,0.08)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.02)] rounded-xl transition flex items-center justify-center gap-2"
+            >
+              ✕ Cancel &amp; Exit
+            </button>
+          </div>
         </div>
 
         {/* Feel Free to Take a Break Info Card */}

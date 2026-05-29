@@ -701,12 +701,24 @@ function GeneratorPreviewContent() {
         setLoading(false);
         return;
       }
+
+      // Try restoring checkedState from sessionStorage
+      let savedChecked: Record<number, boolean> | null = null;
+      if (typeof window !== "undefined") {
+        const stored = sessionStorage.getItem(`checked_state_${activeJobId}`);
+        if (stored) {
+          try {
+            savedChecked = JSON.parse(stored);
+          } catch {}
+        }
+      }
+
       setJob(result.data);
       const initNames: Record<number, string> = {};
       const initChecked: Record<number, boolean> = {};
       result.data.files.forEach((f, i) => {
         initNames[i] = buildDisplayName(f, i);
-        initChecked[i] = true;
+        initChecked[i] = savedChecked && savedChecked[i] !== undefined ? savedChecked[i] : true;
       });
       setDisplayNames(initNames);
       setCheckedState(initChecked);
@@ -716,8 +728,14 @@ function GeneratorPreviewContent() {
   }, [activeJobId, router]);
 
   const handleToggle = useCallback(
-    (index: number) => setCheckedState((prev) => ({ ...prev, [index]: !prev[index] })),
-    []
+    (index: number) => setCheckedState((prev) => {
+      const next = { ...prev, [index]: !prev[index] };
+      if (activeJobId) {
+        sessionStorage.setItem(`checked_state_${activeJobId}`, JSON.stringify(next));
+      }
+      return next;
+    }),
+    [activeJobId]
   );
 
   const handleSelectAll = useCallback(() => {
@@ -725,14 +743,20 @@ function GeneratorPreviewContent() {
     const all: Record<number, boolean> = {};
     job.files.forEach((_, i) => { all[i] = true; });
     setCheckedState(all);
-  }, [job]);
+    if (activeJobId) {
+      sessionStorage.setItem(`checked_state_${activeJobId}`, JSON.stringify(all));
+    }
+  }, [job, activeJobId]);
 
   const handleDeselectAll = useCallback(() => {
     if (!job) return;
     const none: Record<number, boolean> = {};
     job.files.forEach((_, i) => { none[i] = false; });
     setCheckedState(none);
-  }, [job]);
+    if (activeJobId) {
+      sessionStorage.setItem(`checked_state_${activeJobId}`, JSON.stringify(none));
+    }
+  }, [job, activeJobId]);
 
   const startEdit = useCallback((index: number) => {
     setEditingIndex(index);
@@ -902,16 +926,31 @@ function GeneratorPreviewContent() {
               ))}
             </div>
 
-            {/* Continue button */}
-            <motion.button
+            {/* Button Container */}
+            <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: files.length * 0.05 + 0.2 }}
-              onClick={handleContinue}
-              className="mt-8 w-full py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200"
+              className="mt-8 flex flex-col sm:flex-row gap-4 w-full"
             >
-              Continue →
-            </motion.button>
+              <button
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    sessionStorage.removeItem(`checked_state_${activeJobId}`);
+                  }
+                  router.push("/generator/upload");
+                }}
+                className="flex-1 py-4 font-body text-base font-semibold border border-[rgba(239,68,68,0.3)] text-[var(--error)] bg-[rgba(239,68,68,0.05)] rounded-xl hover:bg-[rgba(239,68,68,0.12)] transition duration-200"
+              >
+                ✕ Cancel &amp; Discard Project
+              </button>
+              <button
+                onClick={handleContinue}
+                className="flex-1 py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200"
+              >
+                Continue →
+              </button>
+            </motion.div>
           </div>
         </main>
       </div>

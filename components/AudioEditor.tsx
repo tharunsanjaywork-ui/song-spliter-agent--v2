@@ -291,6 +291,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const [tooltipStep, setTooltipStep] = useState<number>(0);
   // Counter to force WaveSurfer recreation even if blob identity is tricky
   const [waveVersion, setWaveVersion] = useState(0);
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   // Manage beginner tooltip sequence transitions
   useEffect(() => {
@@ -301,6 +302,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       } else if (waveReady) {
         if (segments.length === 1 && cursorTime === 0) {
           setTooltipStep(1);
+          setShowGuideModal(true); // Open guide on first load!
         } else if (segments.length === 1 && cursorTime > 0) {
           setTooltipStep(2);
         } else if (segments.length > 1) {
@@ -309,6 +311,12 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       }
     }
   }, [waveReady, cursorTime, segments.length]);
+
+  const closeGuide = () => {
+    setShowGuideModal(false);
+    localStorage.setItem("audiowave_editor_tooltips_seen", "true");
+    setTooltipStep(-1);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addFileInputRef = useRef<HTMLInputElement>(null);
@@ -340,6 +348,8 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   }, [initialFileUrl]);
 
   // ── Decode and initialise ─────────────────────────────────────────────────────
+
+  const stableStorageKeyRef = useRef<string>("");
 
   const loadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -383,12 +393,29 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         });
         currentStart += decoded.duration;
       }
+
+      // Check for saved segments layout in sessionStorage using stable storage key
+      const storageKey = stableStorageKeyRef.current || `editor_segments_${files.map(f => f.name).join("_")}`;
+      if (!stableStorageKeyRef.current) {
+        stableStorageKeyRef.current = storageKey;
+      }
+      const stored = sessionStorage.getItem(storageKey);
+      let restoredSegments: Segment[] = [];
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.length > 0) {
+            restoredSegments = parsed;
+          }
+        } catch {}
+      }
+      const finalSegments = restoredSegments.length > 0 ? restoredSegments : newSegments;
       
       if (decodedBuffers.length === 1) {
         // Single file: use original file directly (fast path — no WAV conversion)
         setAudioBuffer(decodedBuffers[0]);
         setDuration(decodedBuffers[0].duration);
-        setSegments(newSegments);
+        setSegments(finalSegments);
         setAudioFile(files[0]);
         setWaveVersion((v) => v + 1);
         // Don't set loading=false here — let WaveSurfer "ready" event do it
@@ -411,16 +438,23 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
 
       setAudioBuffer(merged);
       setDuration(merged.duration);
-      setSegments(newSegments);
+      setSegments(finalSegments);
       setAudioFile(mergedFile);
       setWaveVersion((v) => v + 1);
       // Don't set loading=false here — WaveSurfer "ready" event will do it
+      return;
     } catch (err) {
       console.error("Decoding error:", err);
       setErrorMsg("Failed to decode one or more audio files. Please ensure they are valid audio files.");
       setLoading(false);
     }
   }, []);
+
+  // Save segments to sessionStorage when they change
+  useEffect(() => {
+    if (!stableStorageKeyRef.current || segments.length === 0) return;
+    sessionStorage.setItem(stableStorageKeyRef.current, JSON.stringify(segments));
+  }, [segments]);
 
   // ── WaveSurfer ────────────────────────────────────────────────────────────────
   // Recreates whenever audioFile changes (waveVersion forces recreation)
@@ -433,6 +467,9 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     let ws: any = null;
     const container = waveContainerRef.current;
 
+    setIsPlaying(false); // Reset play state when loading a new file
+    const url = URL.createObjectURL(audioFile);
+
     import("wavesurfer.js").then(({ default: WaveSurfer }) => {
       if (cancelled) return;
       ws = WaveSurfer.create({
@@ -443,6 +480,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         height: 96,
         normalize: true,
         interact: true,
+        backend: "MediaElement",
       });
 
       ws.on("ready", () => {
@@ -465,7 +503,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       ws.on("pause", () => { if (!cancelled) setIsPlaying(false); });
       ws.on("finish", () => { if (!cancelled) setIsPlaying(false); });
 
-      ws.loadBlob(audioFile);
+      ws.load(url);
       wavesurferRef.current = ws;
     });
 
@@ -474,6 +512,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       if (ws) {
         ws.destroy();
       }
+      URL.revokeObjectURL(url);
       wavesurferRef.current = null;
       setWaveReady(false);
     };
@@ -650,7 +689,13 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
 
   const handlePlayPause = () => {
     if (!wavesurferRef.current) return;
-    if (isPlaying) wavesurferRef.current.pause(); else wavesurferRef.current.play();
+    if (isPlaying) {
+      wavesurferRef.current.pause();
+    } else {
+      wavesurferRef.current.play().catch((err: unknown) => {
+        console.error("Playback error:", err);
+      });
+    }
   };
 
   // ── Download ──────────────────────────────────────────────────────────────────
@@ -914,6 +959,12 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               <div className="w-4 h-4 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
             )}
             <span className="font-body text-xs text-[var(--text-muted)] truncate max-w-[180px]">{audioFile.name}</span>
+            <button
+              onClick={() => setShowGuideModal(true)}
+              className="px-3 py-1.5 rounded-lg border border-[var(--glass-border)] text-xs font-body text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] transition flex items-center gap-1.5"
+            >
+              💡 Guide
+            </button>
           </div>
 
           {/* Waveform */}
@@ -1011,9 +1062,21 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               disabledReason="Nothing to undo"
               delay={0.35} />
             <div className="flex-1" />
-            <button onClick={() => { setAudioFile(null); setAudioBuffer(null); setSegments([]); setDuration(0); setWaveReady(false); }}
-              className="font-body text-xs text-[var(--text-muted)] hover:text-[var(--error)] px-2 py-1 rounded transition">
-              ✕ Close
+            <button onClick={() => {
+              if (stableStorageKeyRef.current) {
+                sessionStorage.removeItem(stableStorageKeyRef.current);
+              }
+              stableStorageKeyRef.current = "";
+              setAudioFile(null);
+              setAudioBuffer(null);
+              setSegments([]);
+              setDuration(0);
+              setWaveReady(false);
+              setUndoStack([]);
+              setSelectedIds(new Set());
+            }}
+              className="font-body text-xs text-[var(--text-muted)] hover:text-[var(--error)] px-3 py-1.5 border border-[var(--glass-border)] rounded-lg hover:bg-[rgba(239,68,68,0.08)] hover:border-[rgba(239,68,68,0.2)] transition">
+              ✕ Discard &amp; Cancel Project
             </button>
           </div>
 
@@ -1042,22 +1105,108 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Hints */}
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            <div className="flex flex-wrap gap-3">
-              <p className="font-body text-[10px] text-[var(--text-muted)]">
-                💡 Click the waveform to place the cursor, then <strong className="text-[var(--text-secondary)]">Cut</strong> to split.
-              </p>
-              <p className="font-body text-[10px] text-[var(--text-muted)]">
-                Hold <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1 rounded">Shift</kbd> or{" "}
-                <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1 rounded">Ctrl</kbd> to multi-select for merge.
-              </p>
-              <p className="font-body text-[10px] text-[var(--text-muted)]">Double-click a segment name to rename it.</p>
-            </div>
-          </div>
         </main>
       </div>
+
+      {/* Comprehensive Guide Modal */}
+      <AnimatePresence>
+        {showGuideModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          >
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={closeGuide}
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-2xl flex flex-col max-h-[85vh] overflow-y-auto"
+            >
+              {/* Close icon */}
+              <button
+                onClick={closeGuide}
+                className="absolute top-4 right-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl animate-pulse"
+                aria-label="Close guide"
+              >
+                ✕
+              </button>
+
+              <div className="w-12 h-12 rounded-xl bg-[rgba(0,212,255,0.1)] flex items-center justify-center border border-[rgba(0,212,255,0.25)] text-[var(--accent-cyan)] mb-6 text-2xl">
+                💡
+              </div>
+
+              <h3 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-5">
+                Audio Wave Editor Guide
+              </h3>
+
+              <div className="space-y-4 font-body text-xs text-[var(--text-secondary)] leading-relaxed flex-1">
+                <div>
+                  <h4 className="font-semibold text-[var(--accent-cyan)] text-sm mb-1">
+                    ✂️ Slicing/Cutting
+                  </h4>
+                  <p>
+                    Click anywhere on the waveform visualization to position your playback cursor. Once placed, click the <strong>Cut</strong> button in the toolbar to split the track at that exact second.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--accent-cyan)] text-sm mb-1">
+                    🖱️ Multi-Select Tracks
+                  </h4>
+                  <p>
+                    You can select multiple tracks in the sidebar for renaming or merging:
+                  </p>
+                  <ul className="list-disc pl-4 space-y-1 mt-1">
+                    <li><strong>Click</strong> a track to select only that track.</li>
+                    <li><strong>Ctrl + Click</strong> (or Cmd + Click) to select multiple specific tracks.</li>
+                    <li><strong>Shift + Click</strong> to select a range of tracks in a single click.</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--accent-cyan)] text-sm mb-1">
+                    🔗 Merging Tracks
+                  </h4>
+                  <p>
+                    Select two or more tracks (adjacent or non-adjacent), then click the <strong>Merge</strong> button. The timeline will automatically rearrange the tracks to be contiguous and merge them.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--accent-cyan)] text-sm mb-1">
+                    ✏️ Renaming Tracks
+                  </h4>
+                  <p>
+                    Double-click a segment&apos;s name in the left panel, or select exactly one segment and click <strong>Rename</strong> in the toolbar. Type the new name and press Enter to save.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--accent-cyan)] text-sm mb-1">
+                    Download Tracks
+                  </h4>
+                  <p>
+                    Select specific segments and click <strong>Download Selected</strong>, or click <strong>Download All</strong> to compile and download all segments as a single packaged ZIP file.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={closeGuide}
+                className="mt-6 w-full py-3 font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:scale-[1.02] active:scale-[0.98] transition transform"
+              >
+                Close Guide
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

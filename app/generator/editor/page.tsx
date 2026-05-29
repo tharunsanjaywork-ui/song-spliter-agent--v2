@@ -51,30 +51,49 @@ export default function GeneratorEditorPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col">
-      {/* File queue banner — shown only if there are multiple files to fix */}
-      {editorFiles.length > 1 && (
-        <div className="bg-[var(--bg-surface)] border-b border-[var(--glass-border)] px-4 py-2 flex items-center gap-3 overflow-x-auto">
+      {/* Generator Editor Header with Discard Queue button */}
+      <div className="bg-[var(--bg-surface)] border-b border-[var(--glass-border)] px-4 py-2.5 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3 overflow-x-auto py-0.5">
           <span className="font-body text-xs text-[var(--text-muted)] flex-shrink-0">
-            Fix queue:
+            {editorFiles.length > 1 ? "Fix queue:" : "Editing segment:"}
           </span>
-          {editorFiles.map((f, i) => (
-            <motion.button
-              key={i}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.05 }}
-              onClick={() => setActiveIndex(i)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-lg font-body text-xs border transition ${
-                i === activeIndex
-                  ? "bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)] text-[var(--accent-cyan)]"
-                  : "border-[var(--glass-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              {i + 1}. {f.displayName || `Track ${i + 1}`}
-            </motion.button>
-          ))}
+          {editorFiles.length > 1 ? (
+            editorFiles.map((f, i) => (
+              <motion.button
+                key={i}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: i * 0.05 }}
+                onClick={() => setActiveIndex(i)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-lg font-body text-xs border transition ${
+                  i === activeIndex
+                    ? "bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)] text-[var(--accent-cyan)]"
+                    : "border-[var(--glass-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {i + 1}. {f.displayName || `Track ${i + 1}`}
+              </motion.button>
+            ))
+          ) : (
+            <span className="font-body text-xs font-semibold text-[var(--text-primary)]">
+              {active.displayName || "Track 1"}
+            </span>
+          )}
         </div>
-      )}
+
+        <button
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              sessionStorage.removeItem("editorFiles");
+            }
+            setEditorFiles([]);
+            router.push("/generator/upload");
+          }}
+          className="px-3.5 py-1.5 rounded-lg border border-[rgba(239,68,68,0.3)] text-xs font-body text-[var(--error)] bg-[rgba(239,68,68,0.05)] hover:bg-[rgba(239,68,68,0.12)] transition flex items-center gap-1.5"
+        >
+          ✕ Cancel &amp; Discard Queue
+        </button>
+      </div>
 
       {/* Reuse the full AudioEditor component, pre-loaded with the active file's URL */}
       <AudioEditor
