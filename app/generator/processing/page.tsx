@@ -238,6 +238,9 @@ export default function GeneratorProcessingPage() {
   const [analysisStatus, setAnalysisStatus] = useState<string | null>(null);
   const thinkingAddedRef = useRef(false);
   const pipelineStartedRef = useRef(false);
+  const allowThinkingRef = useRef(false);
+  const pendingThinkingEventRef = useRef<ProcessingEvent | null>(null);
+  const [triggerThinkingRender, setTriggerThinkingRender] = useState(false);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
@@ -253,11 +256,23 @@ export default function GeneratorProcessingPage() {
         case "analyzing":
           setIsWaking(false);
           setShowTyping(false);
-          addMessage({ id: "analyzing", emoji: "📊", text: "Analyzing your audio file..." });
+          addMessage({
+            id: "analyzing",
+            emoji: "🤖",
+            text: "AI is currently checking your processed file to analyze and generate a report"
+          });
           setShowTyping(true);
+          setTimeout(() => {
+            allowThinkingRef.current = true;
+            setTriggerThinkingRender(true);
+          }, 4000);
           break;
         case "thinking":
           setShowTyping(false);
+          if (!allowThinkingRef.current) {
+            pendingThinkingEventRef.current = event;
+            break;
+          }
           if (!thinkingAddedRef.current) {
             thinkingAddedRef.current = true;
             addMessage({ id: "thinking", emoji: "🧠", text: "Thinking..." });
@@ -296,6 +311,14 @@ export default function GeneratorProcessingPage() {
   useEffect(() => {
     if (!selectedFile) router.push("/generator/upload");
   }, [selectedFile, router]);
+
+  // Trigger queued thinking event when 4 seconds expire
+  useEffect(() => {
+    if (triggerThinkingRender && pendingThinkingEventRef.current) {
+      handleSseEvent(pendingThinkingEventRef.current);
+      pendingThinkingEventRef.current = null;
+    }
+  }, [triggerThinkingRender, handleSseEvent]);
 
   // Start pipeline once on mount
   useEffect(() => {
@@ -428,7 +451,7 @@ export default function GeneratorProcessingPage() {
               <span className="text-2xl flex-shrink-0 mt-0.5">📤</span>
               <div className="flex-1">
                 <p className="font-body text-sm text-[var(--text-primary)]">
-                  Uploading your audio file…{" "}
+                  Uploading the analyzed file to the AI…{" "}
                   <span className="text-[var(--text-muted)]">(Please don&apos;t close this page)</span>
                 </p>
                 <div className="flex gap-1.5 mt-2">

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Syne, DM_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import KeepAlive from "@/components/KeepAlive";
 
 const syne = Syne({
   subsets: ["latin"],
@@ -35,6 +36,7 @@ export default function RootLayout({
       <body
         className={`${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable} antialiased bg-[var(--bg-deep)] text-[var(--text-primary)]`}
       >
+        <KeepAlive />
         {children}
       </body>
     </html>

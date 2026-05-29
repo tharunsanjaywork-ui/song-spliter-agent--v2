@@ -365,17 +365,35 @@ def _split_audio_ffmpeg(
         fname = f"song_{i + 1:02d}.mp3"
         fpath = os.path.join(output_dir, fname)
 
-        # Run ffmpeg stream copy
-        cmd = [
+        # Run ffmpeg stream copy. Position seeking -ss and -t after -i for universal Linux compatibility.
+        cmd_copy = [
             "ffmpeg", "-y",
-            "-ss", f"{start:.3f}",
             "-i", audio_path,
+            "-ss", f"{start:.3f}",
             "-t", f"{seg_dur:.3f}",
             "-c", "copy",
             fpath
         ]
-        logger.info("Running FFmpeg split segment %d: %s", i + 1, " ".join(cmd))
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            logger.info("Running FFmpeg split copy segment %d: %s", i + 1, " ".join(cmd_copy))
+            subprocess.run(cmd_copy, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except subprocess.CalledProcessError as exc:
+            logger.warning("FFmpeg copy split failed, falling back to transcode: %s", exc.stderr)
+            # Fallback to transcoding (re-encoding) which parses and repairs frames if headers are missing
+            cmd_transcode = [
+                "ffmpeg", "-y",
+                "-i", audio_path,
+                "-ss", f"{start:.3f}",
+                "-t", f"{seg_dur:.3f}",
+                "-b:a", "192k",
+                fpath
+            ]
+            logger.info("Running FFmpeg split transcode: %s", " ".join(cmd_transcode))
+            res = subprocess.run(cmd_transcode, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                logger.error("FFmpeg transcode failed: %s", res.stderr)
+                raise RuntimeError(f"FFmpeg split failed (exit {res.returncode}): {res.stderr}")
+
         output_files.append({
             "index": i,
             "localPath": fpath,
@@ -397,8 +415,8 @@ async def step3_split(
 def _extract_clip_bytes_ffmpeg(filepath: str, skip_sec: int, clip_sec: int) -> bytes | None:
     cmd = [
         "ffmpeg", "-y",
-        "-ss", str(skip_sec),
         "-i", filepath,
+        "-ss", str(skip_sec),
         "-t", str(clip_sec),
         "-ar", "16000",
         "-ac", "1",
