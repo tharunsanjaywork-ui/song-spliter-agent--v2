@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, Suspense } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { saveApiKeys } from "@/lib/api";
+import { saveApiKeys, getKeysStatus } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 
 function GeneratorSetupPage() {
@@ -32,6 +32,24 @@ function GeneratorSetupPage() {
   const [acrHost, setAcrHost] = useState("");
   const [acrAccessKey, setAcrAccessKey] = useState("");
   const [acrSecretKey, setAcrSecretKey] = useState("");
+
+  // Load status and pre-fill if keys are complete
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await getKeysStatus();
+        if (res.success && res.setupComplete) {
+          setOpenrouterKey("sk-or-keep-existing-key-placeholder");
+          setAcrHost("keep-existing-host-placeholder.acrcloud.com");
+          setAcrAccessKey("keep-existing-access-key-placeholder");
+          setAcrSecretKey("keep-existing-secret-key-placeholder");
+        }
+      } catch (err) {
+        console.error("Failed to check keys status:", err);
+      }
+    };
+    fetchStatus();
+  }, []);
 
   // Validation/UI states
   const [errorMsg, setErrorMsg] = useState("");
@@ -452,6 +470,16 @@ function GeneratorSetupPage() {
                   placeholder="sk-or-v1-..."
                   value={openrouterKey}
                   onChange={(e) => setOpenrouterKey(e.target.value)}
+                  onFocus={() => {
+                    if (openrouterKey === "sk-or-keep-existing-key-placeholder") {
+                      setOpenrouterKey("");
+                    }
+                  }}
+                  onBlur={() => {
+                    if (openrouterKey === "") {
+                      setOpenrouterKey("sk-or-keep-existing-key-placeholder");
+                    }
+                  }}
                   className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
                 />
               </motion.div>
@@ -487,6 +515,16 @@ function GeneratorSetupPage() {
                     placeholder="identify-your-region.acrcloud.com"
                     value={acrHost}
                     onChange={(e) => setAcrHost(e.target.value)}
+                    onFocus={() => {
+                      if (acrHost === "keep-existing-host-placeholder.acrcloud.com") {
+                        setAcrHost("");
+                      }
+                    }}
+                    onBlur={() => {
+                      if (acrHost === "") {
+                        setAcrHost("keep-existing-host-placeholder.acrcloud.com");
+                      }
+                    }}
                     className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>
@@ -499,6 +537,16 @@ function GeneratorSetupPage() {
                     placeholder="Enter your Access Key"
                     value={acrAccessKey}
                     onChange={(e) => setAcrAccessKey(e.target.value)}
+                    onFocus={() => {
+                      if (acrAccessKey === "keep-existing-access-key-placeholder") {
+                        setAcrAccessKey("");
+                      }
+                    }}
+                    onBlur={() => {
+                      if (acrAccessKey === "") {
+                        setAcrAccessKey("keep-existing-access-key-placeholder");
+                      }
+                    }}
                     className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>
@@ -511,6 +559,16 @@ function GeneratorSetupPage() {
                     placeholder="Enter your Secret Key"
                     value={acrSecretKey}
                     onChange={(e) => setAcrSecretKey(e.target.value)}
+                    onFocus={() => {
+                      if (acrSecretKey === "keep-existing-secret-key-placeholder") {
+                        setAcrSecretKey("");
+                      }
+                    }}
+                    onBlur={() => {
+                      if (acrSecretKey === "") {
+                        setAcrSecretKey("keep-existing-secret-key-placeholder");
+                      }
+                    }}
                     className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
@@ -268,11 +269,12 @@ export default function GeneratorProcessingPage() {
           }, 4000);
           break;
         case "thinking":
-          setShowTyping(false);
           if (!allowThinkingRef.current) {
             pendingThinkingEventRef.current = event;
+            setShowTyping(true);
             break;
           }
+          setShowTyping(false);
           if (!thinkingAddedRef.current) {
             thinkingAddedRef.current = true;
             addMessage({ id: "thinking", emoji: "🧠", text: "Thinking..." });
@@ -359,8 +361,8 @@ export default function GeneratorProcessingPage() {
 
   const handleErrorContinue = () => {
     setShowErrorModal(false);
-    const anchor = errorType === "acr_limit_exceeded" ? "#acr-section" : "#openrouter-section";
-    router.push(`/generator/setup${anchor}`);
+    const section = errorType === "acr_limit_exceeded" ? "section=acrcloud" : "section=openrouter";
+    router.push(`/generator/setup?${section}`);
   };
 
   return (
@@ -498,6 +500,34 @@ export default function GeneratorProcessingPage() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Feel Free to Take a Break Info Card */}
+        {!processingDone && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.6 }}
+            className="mt-8 p-6 bg-[rgba(13,20,33,0.4)] border border-[var(--glass-border)] rounded-2xl backdrop-blur-md text-center max-w-xl mx-auto flex flex-col items-center shadow-lg w-full"
+          >
+            <div className="relative w-48 h-32 mb-4 overflow-hidden rounded-xl">
+              <Image
+                src="/take_a_break.png"
+                alt="Take a break illustration"
+                fill
+                className="object-cover"
+                unoptimized
+              />
+            </div>
+            <h3 className="font-heading text-base font-bold text-[var(--accent-cyan)] mb-2 flex items-center gap-2 justify-center">
+              ☕ Feel Free to Take a Break
+            </h3>
+            <p className="font-body text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+              Splitting and naming Tamil songs can take around <strong className="text-[var(--text-primary)]">5 to 10 minutes</strong>. 
+              Since this task is linked to your account, you can bookmark this page or close the tab. 
+              The backend will continue processing in the background, and you can see your completed jobs on the welcome page / preview history later.
+            </p>
+          </motion.div>
+        )}
       </main>
 
       <AnimatePresence>

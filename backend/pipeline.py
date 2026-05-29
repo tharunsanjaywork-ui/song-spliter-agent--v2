@@ -376,9 +376,9 @@ def _split_audio_ffmpeg(
         ]
         try:
             logger.info("Running FFmpeg split copy segment %d: %s", i + 1, " ".join(cmd_copy))
-            subprocess.run(cmd_copy, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(cmd_copy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError as exc:
-            logger.warning("FFmpeg copy split failed, falling back to transcode: %s", exc.stderr)
+            logger.warning("FFmpeg copy split failed, falling back to transcode")
             # Fallback to transcoding (re-encoding) which parses and repairs frames if headers are missing
             cmd_transcode = [
                 "ffmpeg", "-y",
@@ -389,10 +389,10 @@ def _split_audio_ffmpeg(
                 fpath
             ]
             logger.info("Running FFmpeg split transcode: %s", " ".join(cmd_transcode))
-            res = subprocess.run(cmd_transcode, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd_transcode, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if res.returncode != 0:
-                logger.error("FFmpeg transcode failed: %s", res.stderr)
-                raise RuntimeError(f"FFmpeg split failed (exit {res.returncode}): {res.stderr}")
+                logger.error("FFmpeg transcode failed with code %d", res.returncode)
+                raise RuntimeError(f"FFmpeg split failed (exit {res.returncode})")
 
         output_files.append({
             "index": i,
@@ -413,6 +413,10 @@ async def step3_split(
 
 # STEP 4 — ACRCloud Song Naming (Concurrently run using asyncio)
 def _extract_clip_bytes_ffmpeg(filepath: str, skip_sec: int, clip_sec: int) -> bytes | None:
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_name = tmp.name
+
     cmd = [
         "ffmpeg", "-y",
         "-i", filepath,
@@ -421,14 +425,20 @@ def _extract_clip_bytes_ffmpeg(filepath: str, skip_sec: int, clip_sec: int) -> b
         "-ar", "16000",
         "-ac", "1",
         "-f", "wav",
-        "-"
+        tmp_name
     ]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode == 0:
-            return res.stdout
+            with open(tmp_name, "rb") as f:
+                return f.read()
     except Exception as exc:
         logger.warning("ffmpeg clip extraction failed: %s", exc)
+    finally:
+        try:
+            os.remove(tmp_name)
+        except OSError:
+            pass
     return None
 
 def _call_acrcloud(

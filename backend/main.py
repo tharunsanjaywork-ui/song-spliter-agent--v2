@@ -218,11 +218,35 @@ async def save_keys(request_data: KeysSaveRequest, user: dict = Depends(get_curr
         user_ref = db.collection("users").document(uid)
         user_doc = user_ref.get()
 
+        # Check if placeholders are used and retrieve existing keys if so
+        existing_keys = {}
+        if user_doc.exists and user_doc.to_dict().get("setupComplete", False):
+            try:
+                existing_keys = get_user_keys(uid)
+            except Exception:
+                pass
+
+        openrouter_key = request_data.openrouter_key
+        if openrouter_key == "sk-or-keep-existing-key-placeholder" and "openrouter_key" in existing_keys:
+            openrouter_key = existing_keys["openrouter_key"]
+
+        acr_host = request_data.acr_host
+        if acr_host == "keep-existing-host-placeholder.acrcloud.com" and "acr_host" in existing_keys:
+            acr_host = existing_keys["acr_host"]
+
+        acr_access_key = request_data.acr_access_key
+        if acr_access_key == "keep-existing-access-key-placeholder" and "acr_access_key" in existing_keys:
+            acr_access_key = existing_keys["acr_access_key"]
+
+        acr_secret_key = request_data.acr_secret_key
+        if acr_secret_key == "keep-existing-secret-key-placeholder" and "acr_secret_key" in existing_keys:
+            acr_secret_key = existing_keys["acr_secret_key"]
+
         # Encrypt keys using cryptography.fernet
-        encrypted_openrouter = encrypt(request_data.openrouter_key)
-        encrypted_host = encrypt(request_data.acr_host)
-        encrypted_access = encrypt(request_data.acr_access_key)
-        encrypted_secret = encrypt(request_data.acr_secret_key)
+        encrypted_openrouter = encrypt(openrouter_key)
+        encrypted_host = encrypt(acr_host)
+        encrypted_access = encrypt(acr_access_key)
+        encrypted_secret = encrypt(acr_secret_key)
 
         if user_doc.exists:
             update_data = {
