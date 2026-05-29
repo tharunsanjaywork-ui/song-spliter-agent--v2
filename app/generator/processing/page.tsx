@@ -24,8 +24,8 @@ interface ChatMessage {
 
 const ERROR_CONTENT: Record<ErrorType, { title: string; body: string }> = {
   acr_limit_exceeded: {
-    title: "ACRCloud Free Trial Ended",
-    body: "Your ACRCloud free trial has ended. No worries — you can create a new free ACRCloud account with a different Gmail address and continue using AudioWave for free. This app is always free and open source.",
+    title: "AcoustID Key Error or Limit Exceeded",
+    body: "Your AcoustID Client API key might be invalid or rate limits have been exceeded. Please check your key in the Setup Guide. Getting an AcoustID API key is always free.",
   },
   openrouter_limit_exceeded: {
     title: "OpenRouter Credits Ended",

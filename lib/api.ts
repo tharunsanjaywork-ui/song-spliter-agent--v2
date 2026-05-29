@@ -43,9 +43,7 @@ async function authHeaders(): Promise<HeadersInit> {
 
 export async function saveApiKeys(
   openrouterKey: string,
-  acrHost: string,
-  acrAccessKey: string,
-  acrSecretKey: string
+  acoustidKey: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const headers = await authHeaders();
@@ -54,9 +52,7 @@ export async function saveApiKeys(
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
         openrouter_key: openrouterKey,
-        acr_host: acrHost,
-        acr_access_key: acrAccessKey,
-        acr_secret_key: acrSecretKey,
+        acoustid_key: acoustidKey,
       }),
     });
     const data = await response.json();

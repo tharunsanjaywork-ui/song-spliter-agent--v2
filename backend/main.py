@@ -125,22 +125,13 @@ async def get_current_uid(user: dict = Depends(get_current_user)) -> str:
 # --- Pydantic Validation Schemas ---
 class KeysSaveRequest(BaseModel):
     openrouter_key: str = Field(..., min_length=20)
-    acr_host: str = Field(..., min_length=10)
-    acr_access_key: str = Field(..., min_length=10)
-    acr_secret_key: str = Field(..., min_length=10)
+    acoustid_key: str = Field(..., min_length=10)
 
     @field_validator("openrouter_key")
     @classmethod
     def validate_openrouter_key(cls, value: str) -> str:
         if not value.startswith("sk-or"):
             raise ValueError("This key doesn't look right. Please copy it again from OpenRouter and try again.")
-        return value
-
-    @field_validator("acr_host")
-    @classmethod
-    def validate_acr_host(cls, value: str) -> str:
-        if ".acrcloud.com" not in value:
-            raise ValueError("This key doesn't look right. Please copy it again from ACRCloud and try again.")
         return value
 
 
@@ -230,31 +221,19 @@ async def save_keys(request_data: KeysSaveRequest, user: dict = Depends(get_curr
         if openrouter_key == "sk-or-keep-existing-key-placeholder" and "openrouter_key" in existing_keys:
             openrouter_key = existing_keys["openrouter_key"]
 
-        acr_host = request_data.acr_host
-        if acr_host == "keep-existing-host-placeholder.acrcloud.com" and "acr_host" in existing_keys:
-            acr_host = existing_keys["acr_host"]
-
-        acr_access_key = request_data.acr_access_key
-        if acr_access_key == "keep-existing-access-key-placeholder" and "acr_access_key" in existing_keys:
-            acr_access_key = existing_keys["acr_access_key"]
-
-        acr_secret_key = request_data.acr_secret_key
-        if acr_secret_key == "keep-existing-secret-key-placeholder" and "acr_secret_key" in existing_keys:
-            acr_secret_key = existing_keys["acr_secret_key"]
+        acoustid_key = request_data.acoustid_key
+        if acoustid_key == "keep-existing-acoustid-key-placeholder" and "acoustid_key" in existing_keys:
+            acoustid_key = existing_keys["acoustid_key"]
 
         # Encrypt keys using cryptography.fernet
         encrypted_openrouter = encrypt(openrouter_key)
-        encrypted_host = encrypt(acr_host)
-        encrypted_access = encrypt(acr_access_key)
-        encrypted_secret = encrypt(acr_secret_key)
+        encrypted_acoustid = encrypt(acoustid_key)
 
         if user_doc.exists:
             update_data = {
                 "setupComplete": True,
                 "openrouterKeyEncrypted": encrypted_openrouter,
-                "acrHostEncrypted": encrypted_host,
-                "acrAccessKeyEncrypted": encrypted_access,
-                "acrSecretKeyEncrypted": encrypted_secret,
+                "acoustidKeyEncrypted": encrypted_acoustid,
                 "updatedAt": firestore.firestore.SERVER_TIMESTAMP
             }
             if email:
@@ -270,9 +249,7 @@ async def save_keys(request_data: KeysSaveRequest, user: dict = Depends(get_curr
                 "displayName": display_name,
                 "setupComplete": True,
                 "openrouterKeyEncrypted": encrypted_openrouter,
-                "acrHostEncrypted": encrypted_host,
-                "acrAccessKeyEncrypted": encrypted_access,
-                "acrSecretKeyEncrypted": encrypted_secret,
+                "acoustidKeyEncrypted": encrypted_acoustid,
                 "createdAt": firestore.firestore.SERVER_TIMESTAMP,
                 "updatedAt": firestore.firestore.SERVER_TIMESTAMP
             }
@@ -439,12 +416,16 @@ def get_user_keys(uid: str) -> dict:
         if not data.get("setupComplete", False):
             raise HTTPException(400, "Setup not complete. Please set up your API keys first.")
 
-        return {
+        keys = {
             "openrouter_key": decrypt(data["openrouterKeyEncrypted"]),
-            "acr_host": decrypt(data["acrHostEncrypted"]),
-            "acr_access_key": decrypt(data["acrAccessKeyEncrypted"]),
-            "acr_secret_key": decrypt(data["acrSecretKeyEncrypted"]),
         }
+        if "acoustidKeyEncrypted" in data:
+            keys["acoustid_key"] = decrypt(data["acoustidKeyEncrypted"])
+        if "acrAccessKeyEncrypted" in data:
+            keys["acr_host"] = decrypt(data["acrHostEncrypted"])
+            keys["acr_access_key"] = decrypt(data["acrAccessKeyEncrypted"])
+            keys["acr_secret_key"] = decrypt(data["acrSecretKeyEncrypted"])
+        return keys
     except HTTPException:
         raise
     except Exception as exc:
@@ -556,9 +537,7 @@ async def process_audio(
                 audio_path=audio_path,
                 uid=uid,
                 openrouter_key=user_keys["openrouter_key"],
-                acr_host=user_keys["acr_host"],
-                acr_key=user_keys["acr_access_key"],
-                acr_secret=user_keys["acr_secret_key"],
+                keys=user_keys,
                 work_dir=work_dir,
                 job_id=job_id,
                 analysis=analysis_json,

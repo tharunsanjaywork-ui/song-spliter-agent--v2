@@ -503,44 +503,168 @@ def _safe_filename(name: str) -> str:
     name = re.sub(r"\s+", "_", name.strip()).strip("._")
     return name[:80] if name else "Unknown"
 
+def get_fpcalc_executable() -> str:
+    """Ensure fpcalc is downloaded and return its local absolute path."""
+    import platform
+    import tarfile
+    import zipfile
+    import urllib.request
+    import shutil
+    import tempfile
+    
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    is_windows = platform.system() == "Windows"
+    ext = ".exe" if is_windows else ""
+    local_path = os.path.join(backend_dir, f"fpcalc{ext}")
+    
+    if os.path.exists(local_path):
+        return local_path
+        
+    logger.info("fpcalc executable not found. Downloading...")
+    
+    if is_windows:
+        url = "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-windows-x86_64.zip"
+    else:
+        url = "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-linux-x86_64.tar.gz"
+        
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = os.path.join(tmpdir, "fpcalc_archive")
+        try:
+            urllib.request.urlretrieve(url, archive_path)
+            if is_windows:
+                with zipfile.ZipFile(archive_path, "r") as zip_ref:
+                    zip_ref.extractall(tmpdir)
+            else:
+                with tarfile.open(archive_path, "r:gz") as tar_ref:
+                    tar_ref.extractall(tmpdir)
+                    
+            for root, dirs, files in os.walk(tmpdir):
+                target_name = f"fpcalc{ext}"
+                if target_name in files:
+                    src = os.path.join(root, target_name)
+                    shutil.copy2(src, local_path)
+                    if not is_windows:
+                        os.chmod(local_path, 0o755)
+                    logger.info("fpcalc successfully downloaded and stored at: %s", local_path)
+                    return local_path
+        except Exception as exc:
+            logger.exception("Failed to download/extract fpcalc")
+            system_fpcalc = shutil.which("fpcalc")
+            if system_fpcalc:
+                return system_fpcalc
+            raise RuntimeError("fpcalc fingerprinting binary is missing and download failed.")
+
+def _lookup_acoustid(fpcalc_path: str, filepath: str, acoustid_key: str) -> tuple[str | None, str | None]:
+    """Fingerprint a file and query the AcoustID API for recording metadata."""
+    cmd = [fpcalc_path, "-json", filepath]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        data = json.loads(res.stdout)
+        duration = data.get("duration")
+        fingerprint = data.get("fingerprint")
+        if not duration or not fingerprint:
+            return None, None
+    except Exception as exc:
+        logger.warning("fpcalc execution failed: %s", exc)
+        return None, None
+
+    url = "https://api.acoustid.org/v2/lookup"
+    post_data = {
+        "client": acoustid_key,
+        "meta": "recordings",
+        "duration": int(duration),
+        "fingerprint": fingerprint
+    }
+    
+    import urllib.request
+    import urllib.parse
+    req = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(post_data).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            if res_data.get("status") == "error":
+                error_info = res_data.get("error", {})
+                err_msg = error_info.get("message", "")
+                logger.error("AcoustID API error: %s", err_msg)
+                if "invalid client" in err_msg.lower() or "unknown client" in err_msg.lower():
+                    raise ACRInvalidCredentials("AcoustID Client API Key is invalid.")
+                elif "limit" in err_msg.lower() or "exceeded" in err_msg.lower():
+                    raise ACRLimitExceeded("AcoustID rate limit exceeded.")
+                else:
+                    raise RuntimeError(f"AcoustID error: {err_msg}")
+            
+            if res_data.get("status") == "ok" and res_data.get("results"):
+                best_recording = None
+                highest_score = 0.0
+                for match in res_data["results"]:
+                    score = match.get("score", 0.0)
+                    recordings = match.get("recordings", [])
+                    if score > highest_score and recordings:
+                        highest_score = score
+                        best_recording = recordings[0]
+                if best_recording:
+                    title = best_recording.get("title")
+                    artists = best_recording.get("artists", [])
+                    artist_name = artists[0].get("name", "Unknown") if artists else "Unknown"
+                    return title, artist_name
+    except (ACRInvalidCredentials, ACRLimitExceeded):
+        raise
+    except Exception as exc:
+        logger.warning("AcoustID API request failed: %s", exc)
+    return None, None
+
 async def _recognize_single_song(
     idx: int,
     filepath: str,
     duration_sec: float,
-    acr_host: str,
-    acr_key: str,
-    acr_secret: str,
+    keys: dict,
+    fpcalc_path: str = None,
 ) -> dict:
     loop = asyncio.get_event_loop()
     display_name = f"Unidentified Song {idx + 1:02d}"
     recognized = False
 
-    for skip in ACR_SKIP_OFFSETS:
-        if duration_sec < skip + 3:
-            continue
-        audio_bytes = await loop.run_in_executor(
-            None, _extract_clip_bytes_ffmpeg, filepath, skip, ACR_CLIP_SECONDS
+    if "acoustid_key" in keys and fpcalc_path:
+        title, artist = await loop.run_in_executor(
+            None, _lookup_acoustid, fpcalc_path, filepath, keys["acoustid_key"]
         )
-        if audio_bytes is None:
-            continue
-
-        response = await loop.run_in_executor(
-            None, _call_acrcloud, audio_bytes, acr_host, acr_key, acr_secret
-        )
-        status_code = response.get("status", {}).get("code", -1)
-        if status_code == 3003:
-            raise ACRLimitExceeded("ACRCloud trial limit exceeded")
-        elif status_code in (2004, 3000, 3015):
-            raise ACRInvalidCredentials(f"ACRCloud credentials are invalid or misconfigured (error {status_code}).")
-
-        title, artist = _parse_acr_response(response)
         if title:
-            display_name = _safe_filename(title)
+            display_name = _safe_filename(f"{artist} - {title}" if artist else title)
             recognized = True
-            logger.info("Recognized: %s — %s", title, artist or "Unknown")
-            break
+            logger.info("Recognized via AcoustID: %s — %s", title, artist or "Unknown")
+            
+    elif "acr_access_key" in keys:
+        for skip in ACR_SKIP_OFFSETS:
+            if duration_sec < skip + 3:
+                continue
+            audio_bytes = await loop.run_in_executor(
+                None, _extract_clip_bytes_ffmpeg, filepath, skip, ACR_CLIP_SECONDS
+            )
+            if audio_bytes is None:
+                continue
 
-        await asyncio.sleep(0.2)
+            response = await loop.run_in_executor(
+                None, _call_acrcloud, audio_bytes, keys["acr_host"], keys["acr_access_key"], keys["acr_secret_key"]
+            )
+            status_code = response.get("status", {}).get("code", -1)
+            if status_code == 3003:
+                raise ACRLimitExceeded("ACRCloud trial limit exceeded")
+            elif status_code in (2004, 3000, 3015):
+                raise ACRInvalidCredentials(f"ACRCloud credentials are invalid or misconfigured (error {status_code}).")
+
+            title, artist = _parse_acr_response(response)
+            if title:
+                display_name = _safe_filename(title)
+                recognized = True
+                logger.info("Recognized: %s — %s", title, artist or "Unknown")
+                break
+
+            await asyncio.sleep(0.2)
 
     return {
         "index": idx,
@@ -552,11 +676,16 @@ async def _recognize_single_song(
 
 async def step4_name(
     song_info_list: list[dict],
-    acr_host: str,
-    acr_key: str,
-    acr_secret: str,
+    keys: dict,
 ) -> list[dict]:
-    """Step 4: Name songs via ACRCloud in parallel."""
+    """Step 4: Name songs via AcoustID or ACRCloud in parallel."""
+    fpcalc_path = None
+    if "acoustid_key" in keys:
+        try:
+            fpcalc_path = get_fpcalc_executable()
+        except Exception as exc:
+            logger.warning("Failed to obtain fpcalc executable: %s", exc)
+
     tasks = []
     for info in song_info_list:
         tasks.append(
@@ -564,9 +693,8 @@ async def step4_name(
                 idx=info["index"],
                 filepath=info["localPath"],
                 duration_sec=info["duration"],
-                acr_host=acr_host,
-                acr_key=acr_key,
-                acr_secret=acr_secret,
+                keys=keys,
+                fpcalc_path=fpcalc_path,
             )
         )
     return await asyncio.gather(*tasks)
@@ -576,9 +704,7 @@ async def run_pipeline(
     audio_path: str,
     uid: str,
     openrouter_key: str,
-    acr_host: str,
-    acr_key: str,
-    acr_secret: str,
+    keys: dict,
     work_dir: str,
     job_id: str = None,
     analysis: dict = None,
@@ -626,7 +752,7 @@ async def run_pipeline(
 
         # ── Step 4: Name ──
         yield {"step": "naming", "message": "Naming your songs..."}
-        named_files = await step4_name(song_files, acr_host, acr_key, acr_secret)
+        named_files = await step4_name(song_files, keys)
         logger.info("Step 4 complete: %d files named", len(named_files))
 
         # ── Done ──

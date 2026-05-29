@@ -29,9 +29,7 @@ function GeneratorSetupPage() {
 
   // Input states
   const [openrouterKey, setOpenrouterKey] = useState("");
-  const [acrHost, setAcrHost] = useState("");
-  const [acrAccessKey, setAcrAccessKey] = useState("");
-  const [acrSecretKey, setAcrSecretKey] = useState("");
+  const [acoustidKey, setAcoustidKey] = useState("");
 
   // Load status and pre-fill if keys are complete
   useEffect(() => {
@@ -40,9 +38,7 @@ function GeneratorSetupPage() {
         const res = await getKeysStatus();
         if (res.success && res.setupComplete) {
           setOpenrouterKey("sk-or-keep-existing-key-placeholder");
-          setAcrHost("keep-existing-host-placeholder.acrcloud.com");
-          setAcrAccessKey("keep-existing-access-key-placeholder");
-          setAcrSecretKey("keep-existing-secret-key-placeholder");
+          setAcoustidKey("keep-existing-acoustid-key-placeholder");
         }
       } catch (err) {
         console.error("Failed to check keys status:", err);
@@ -126,17 +122,12 @@ function GeneratorSetupPage() {
   };
 
   const handleCompleteSetup = async () => {
-    const cleanedHost = acrHost.trim();
-    const cleanedAccess = acrAccessKey.trim();
-    const cleanedSecret = acrSecretKey.trim();
+    const cleanedAcoustid = acoustidKey.trim();
+    const isAcoustidValid = cleanedAcoustid.length >= 8;
 
-    const isHostValid = cleanedHost.includes(".acrcloud.com") && cleanedHost.length >= 10;
-    const isAccessValid = cleanedAccess.length >= 10;
-    const isSecretValid = cleanedSecret.length >= 10;
-
-    if (!isHostValid || !isAccessValid || !isSecretValid) {
+    if (!isAcoustidValid) {
       setErrorMsg(
-        "This key doesn't look right. Please copy it again from ACRCloud and try again."
+        "This Client API Key doesn't look right. Please copy it again from AcoustID and try again."
       );
       setShakeAcr(true);
       return;
@@ -147,9 +138,7 @@ function GeneratorSetupPage() {
 
     const result = await saveApiKeys(
       openrouterKey.trim(),
-      cleanedHost,
-      cleanedAccess,
-      cleanedSecret
+      cleanedAcoustid
     );
 
     if (result.success) {
@@ -226,79 +215,61 @@ function GeneratorSetupPage() {
     },
   ];
 
-  const acrcloudSteps = [
+  const acoustidSteps = [
     {
       id: 1,
-      title: "Open ACRCloud Console",
+      title: "Open AcoustID Applications Manager",
       desc: (
         <span>
-          Click this link to open the ACRCloud console:{" "}
+          Click this link to open the AcoustID applications page:{" "}
           <a
-            href="https://console.acrcloud.com/signup#/register"
+            href="https://acoustid.org/my-applications"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[var(--accent-cyan)] underline hover:text-cyan-300 font-semibold"
           >
-            https://console.acrcloud.com/signup#/register
+            https://acoustid.org/my-applications
           </a>{" "}
-          and sign in or create an account.
+          and sign in.
         </span>
       ),
-      image: "acr_step1.png",
+      image: null,
     },
     {
       id: 2,
-      title: "Login / Register",
-      desc: "Sign in with your preferred option (e.g., Google or Email) to access the console.",
-      image: "acr_step2.png",
+      title: "Log In using MusicBrainz",
+      desc: (
+        <span>
+          Sign in using your free MusicBrainz account. If you do not have one, you can register quickly at{" "}
+          <a
+            href="https://musicbrainz.org/register"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--accent-cyan)] underline hover:text-cyan-300 font-semibold"
+          >
+            https://musicbrainz.org/register
+          </a>.
+        </span>
+      ),
+      image: null,
     },
     {
       id: 3,
-      title: "Submit Profile Details",
-      desc: "Provide the requested configuration details and click Submit to complete account registration.",
-      image: "acr_step3.png",
+      title: "Register a New Application",
+      desc: "Click the 'Register application' button. Enter a name (e.g. 'AudioWave Splitter'), provide a brief description, and submit the form.",
+      image: null,
     },
     {
       id: 4,
-      title: "Select Audio & Video Recognition",
-      desc: "Choose the first option 'Audio and Video Recognition' to access music signature search services.",
-      image: "acr_step4.png",
-    },
-    {
-      id: 5,
-      title: "Open Projects Side Menu",
-      desc: "Click on 'Projects' under the Audio & Video Recognition section in the left sidebar menu.",
-      image: "acr_step5.png",
-    },
-    {
-      id: 6,
-      title: "Select Audio & Video Recognition Sub-section",
-      desc: "Inside Projects, click on the 'Audio and Video Recognition' card to proceed.",
-      image: "acr_step6.png",
-    },
-    {
-      id: 7,
-      title: "Click Create Project",
-      desc: "Click the blue 'Create Project' button on the top right side of the project panel.",
-      image: "acr_step7.png",
-    },
-    {
-      id: 8,
-      title: "Configure Project",
-      desc: "Enter a project name (e.g., 'AudioWave'), verify that you use the default settings, and click 'Confirm'.",
-      image: "acr_step8.png",
-    },
-    {
-      id: 9,
-      title: "Copy Credentials",
-      desc: "Locate Host, Access Key, and Secret Key inside your new project panel. Paste them individually below.",
-      image: "acr_step9.png",
+      title: "Copy the Client API Key",
+      desc: "Once your application is registered, copy the generated Client API Key (e.g., 'FNXfrDqZeY') and paste it in the input field below to complete the setup.",
+      image: null,
     },
   ];
 
   if (!section) return null;
 
-  const currentSteps = section === "openrouter" ? openrouterSteps : acrcloudSteps;
+  const currentSteps = section === "openrouter" ? openrouterSteps : acoustidSteps;
   const totalSteps = currentSteps.length;
 
   return (
@@ -487,18 +458,18 @@ function GeneratorSetupPage() {
                 onClick={handleNextSection}
                 className="w-full sm:w-auto font-body font-semibold text-sm py-3 px-8 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_20px_rgba(0,212,255,0.25)] hover:scale-[1.03] active:scale-[0.97] transition transform duration-200"
               >
-                Next: ACRCloud Setup
+                Next: AcoustID Setup
               </button>
             </motion.div>
           ) : (
             <motion.div
-              key="acrcloud-form"
+              key="acoustid-form"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="max-w-xl mx-auto"
             >
               <h3 className="font-heading text-xl font-bold text-[var(--text-primary)] text-center mb-6">
-                Enter ACRCloud Credentials
+                Enter AcoustID Client Key
               </h3>
               <motion.div
                 animate={shakeAcr ? { x: [0, -8, 8, -8, 8, 0] } : {}}
@@ -508,65 +479,21 @@ function GeneratorSetupPage() {
               >
                 <div>
                   <label className="block text-xs font-semibold font-body text-[var(--text-secondary)] mb-2">
-                    ACR Host (e.g., identify-ap-southeast-1.acrcloud.com)
+                    AcoustID Client API Key (e.g., FNXfrDqZeY)
                   </label>
                   <input
                     type="text"
-                    placeholder="identify-your-region.acrcloud.com"
-                    value={acrHost}
-                    onChange={(e) => setAcrHost(e.target.value)}
+                    placeholder="Enter your Client API Key"
+                    value={acoustidKey}
+                    onChange={(e) => setAcoustidKey(e.target.value)}
                     onFocus={() => {
-                      if (acrHost === "keep-existing-host-placeholder.acrcloud.com") {
-                        setAcrHost("");
+                      if (acoustidKey === "keep-existing-acoustid-key-placeholder") {
+                        setAcoustidKey("");
                       }
                     }}
                     onBlur={() => {
-                      if (acrHost === "") {
-                        setAcrHost("keep-existing-host-placeholder.acrcloud.com");
-                      }
-                    }}
-                    className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold font-body text-[var(--text-secondary)] mb-2">
-                    ACR Access Key
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter your Access Key"
-                    value={acrAccessKey}
-                    onChange={(e) => setAcrAccessKey(e.target.value)}
-                    onFocus={() => {
-                      if (acrAccessKey === "keep-existing-access-key-placeholder") {
-                        setAcrAccessKey("");
-                      }
-                    }}
-                    onBlur={() => {
-                      if (acrAccessKey === "") {
-                        setAcrAccessKey("keep-existing-access-key-placeholder");
-                      }
-                    }}
-                    className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold font-body text-[var(--text-secondary)] mb-2">
-                    ACR Secret Key
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Enter your Secret Key"
-                    value={acrSecretKey}
-                    onChange={(e) => setAcrSecretKey(e.target.value)}
-                    onFocus={() => {
-                      if (acrSecretKey === "keep-existing-secret-key-placeholder") {
-                        setAcrSecretKey("");
-                      }
-                    }}
-                    onBlur={() => {
-                      if (acrSecretKey === "") {
-                        setAcrSecretKey("keep-existing-secret-key-placeholder");
+                      if (acoustidKey === "") {
+                        setAcoustidKey("keep-existing-acoustid-key-placeholder");
                       }
                     }}
                     className="w-full bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.08)] rounded-xl py-3 px-4 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-[3px] focus:ring-[rgba(0,212,255,0.15)] transition"
