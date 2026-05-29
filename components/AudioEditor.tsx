@@ -29,6 +29,30 @@ function buildSegmentName(index: number): string {
   return `Track ${String(index + 1).padStart(2, "0")}`;
 }
 
+function concatenateAudioBuffers(ctx: AudioContext, buffers: AudioBuffer[]): AudioBuffer {
+  if (buffers.length === 0) throw new Error("No buffers to concatenate");
+  if (buffers.length === 1) return buffers[0];
+
+  const targetSampleRate = buffers[0].sampleRate;
+  const maxChannels = Math.max(...buffers.map((b) => b.numberOfChannels));
+  const totalLength = buffers.reduce((sum, b) => sum + b.length, 0);
+
+  const merged = ctx.createBuffer(maxChannels, totalLength, targetSampleRate);
+
+  for (let ch = 0; ch < maxChannels; ch++) {
+    const channelData = new Float32Array(totalLength);
+    let offset = 0;
+    for (const buf of buffers) {
+      const srcCh = Math.min(ch, buf.numberOfChannels - 1);
+      channelData.set(buf.getChannelData(srcCh), offset);
+      offset += buf.length;
+    }
+    merged.copyToChannel(channelData, ch);
+  }
+
+  return merged;
+}
+
 // ─── Toolbar Button ───────────────────────────────────────────────────────────
 
 function ToolbarBtn({
@@ -220,7 +244,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       try {
         const blob = await fetch(initialFileUrl).then((r) => r.blob());
         const file = new File([blob], initialFileName ?? "track.mp3", { type: blob.type || "audio/mpeg" });
-        await loadFile(file);
+        await loadFiles([file]);
       } catch {
         setErrorMsg("Failed to load audio from the server.");
       } finally {
@@ -233,7 +257,8 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
 
   // ── Decode and initialise ─────────────────────────────────────────────────────
 
-  const loadFile = useCallback(async (file: File) => {
+  const loadFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
     setLoading(true);
     setWaveReady(false);
     setSegments([]);
@@ -250,22 +275,49 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         }
         audioCtxRef.current = null;
       }
-      const ab = await file.arrayBuffer();
+      
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioCtxRef.current = ctx;
-      const decoded = await ctx.decodeAudioData(ab);
-      setAudioBuffer(decoded);
-      setDuration(decoded.duration);
-      setAudioFile(file);
-      setSegments([{ id: uid(), name: file.name.replace(/\.[^.]+$/, ""), startSec: 0, endSec: decoded.duration }]);
+      
+      const decodedBuffers: AudioBuffer[] = [];
+      const newSegments: Segment[] = [];
+      let currentStart = 0;
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ab = await file.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(ab);
+        decodedBuffers.push(decoded);
+        newSegments.push({
+          id: uid(),
+          name: file.name.replace(/\.[^.]+$/, ""),
+          startSec: currentStart,
+          endSec: currentStart + decoded.duration,
+        });
+        currentStart += decoded.duration;
+      }
+      
+      if (files.length === 1) {
+        setAudioBuffer(decodedBuffers[0]);
+        setDuration(decodedBuffers[0].duration);
+        setSegments(newSegments);
+        setAudioFile(files[0]);
+        return;
+      }
+      
+      const merged = concatenateAudioBuffers(ctx, decodedBuffers);
+      const wavBytes = audioBufferToWav(merged);
+      const wavBlob = new Blob([wavBytes], { type: "audio/wav" });
+      const mergedFile = new File([wavBlob], files[0].name.replace(/\.[^.]+$/, "") + "_merged.wav", { type: "audio/wav" });
+      
+      setAudioBuffer(merged);
+      setDuration(merged.duration);
+      setSegments(newSegments);
+      setAudioFile(mergedFile);
     } catch (err) {
       console.error("Decoding error:", err);
-      if (file.size > 50 * 1024 * 1024) {
-        setErrorMsg("Failed to decode audio. Large audio files often exceed browser memory limits. Please try a smaller file (under 50MB) or use a compressed format.");
-      } else {
-        setErrorMsg("Failed to decode audio. Please try a different file.");
-      }
+      setErrorMsg("Failed to decode one or more audio files. Please ensure they are valid audio files.");
     } finally {
       setLoading(false);
     }
@@ -299,24 +351,42 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
 
   // ── File validation ───────────────────────────────────────────────────────────
 
-  const validateAndLoad = useCallback(async (file: File) => {
+  const validateAndLoadFiles = useCallback(async (files: File[]) => {
     const ALLOWED_EXTS = [".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"];
-    const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
-    if (!ALLOWED_EXTS.includes(ext)) { setErrorMsg("Unsupported file type."); return; }
-    if (file.size > 500 * 1024 * 1024) { setErrorMsg("File too large. Max 500 MB."); return; }
+    const validFiles: File[] = [];
+    
+    for (const file of files) {
+      const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
+      if (!ALLOWED_EXTS.includes(ext)) {
+        setErrorMsg(`Unsupported file type: ${file.name}`);
+        return;
+      }
+      if (file.size > 500 * 1024 * 1024) {
+        setErrorMsg(`File too large (max 500 MB): ${file.name}`);
+        return;
+      }
+      validFiles.push(file);
+    }
+    
     setErrorMsg(null);
-    await loadFile(file);
-  }, [loadFile]);
+    if (validFiles.length > 0) {
+      await loadFiles(validFiles);
+    }
+  }, [loadFiles]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) await validateAndLoad(file);
-  }, [validateAndLoad]);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await validateAndLoadFiles(Array.from(files));
+    }
+  }, [validateAndLoadFiles]);
 
   const handleFileInput = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) await validateAndLoad(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      await validateAndLoadFiles(Array.from(files));
+    }
   };
 
   // ── Undo helper ───────────────────────────────────────────────────────────────
@@ -460,22 +530,27 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const handleAddFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !audioBuffer || !audioCtxRef.current) return;
+    setLoading(true);
     try {
       const decoded = await audioCtxRef.current.decodeAudioData(await file.arrayBuffer());
       const newDur = duration + decoded.duration;
-      const merged = audioCtxRef.current.createBuffer(
-        audioBuffer.numberOfChannels, audioBuffer.length + decoded.length, audioBuffer.sampleRate
-      );
-      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
-        const data = new Float32Array(audioBuffer.length + decoded.length);
-        data.set(audioBuffer.getChannelData(ch), 0);
-        data.set(decoded.getChannelData(Math.min(ch, decoded.numberOfChannels - 1)), audioBuffer.length);
-        merged.copyToChannel(data, ch);
-      }
+      
+      const merged = concatenateAudioBuffers(audioCtxRef.current, [audioBuffer, decoded]);
+      
+      // Generate WAV file so WaveSurfer can reload and play the combined track
+      const wavBytes = audioBufferToWav(merged);
+      const wavBlob = new Blob([wavBytes], { type: "audio/wav" });
+      const newFile = new File([wavBlob], audioFile?.name || "merged_audio.wav", { type: "audio/wav" });
+      
       setAudioBuffer(merged);
       setDuration(newDur);
       setSegments((p) => [...p, { id: uid(), name: file.name.replace(/\.[^.]+$/, ""), startSec: duration, endSec: newDur }]);
-    } catch { setErrorMsg("Failed to decode the added file."); }
+      setAudioFile(newFile);
+    } catch {
+      setErrorMsg("Failed to decode the added file.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── Empty state ───────────────────────────────────────────────────────────────
@@ -493,7 +568,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               Cut, merge, and rename audio segments. Download each track as WAV.
             </p>
           </motion.div>
-          <input ref={fileInputRef} type="file" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a" className="hidden" onChange={handleFileInput} />
+          <input ref={fileInputRef} type="file" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a" className="hidden" onChange={handleFileInput} multiple />
           <EditorDropZone dragOver={dragOver}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -510,7 +585,15 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   return (
     <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] flex flex-col">
       <Navbar />
-      <div className="flex-1 flex overflow-hidden" style={{ maxHeight: "calc(100vh - 64px)" }}>
+      <div className="flex-1 flex overflow-hidden relative" style={{ maxHeight: "calc(100vh - 64px)" }}>
+        {loading && (
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center flex-col gap-4">
+            <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
+            <p className="font-body text-sm text-[var(--text-secondary)] animate-pulse">
+              Processing combined timeline...
+            </p>
+          </div>
+        )}
 
         {/* Sidebar */}
         <aside className="w-56 sm:w-64 flex flex-col border-r border-[var(--glass-border)] bg-[var(--bg-surface)] overflow-hidden flex-shrink-0">
