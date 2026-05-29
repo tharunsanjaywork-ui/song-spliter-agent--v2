@@ -1,18 +1,21 @@
 "use client";
 
 import React, { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"about" | "privacy">("about");
 
   const handleLogout = async () => {
     try {
@@ -24,74 +27,117 @@ export default function Navbar() {
   };
 
   const navLinks = [
+    { name: "Dashboard", href: "/welcome" },
     { name: "Audio Editor", href: "/editor" },
     { name: "Generator", href: "/generator" },
   ];
 
   return (
-    <nav className="w-full bg-[var(--bg-surface)] border-b border-[var(--glass-border)] sticky top-0 z-50 backdrop-blur-md">
+    <nav className="w-full bg-[rgba(15,15,15,0.75)] border-b border-[var(--glass-border)] sticky top-0 z-50 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.4)]">
+      <style>{`
+        @keyframes navWave {
+          0%, 100% { height: 25%; }
+          50% { height: 100%; }
+        }
+        .animate-nav-wave-1 { animation: navWave 1.2s ease-in-out infinite; }
+        .animate-nav-wave-2 { animation: navWave 1.2s ease-in-out infinite 0.15s; }
+        .animate-nav-wave-3 { animation: navWave 1.2s ease-in-out infinite 0.3s; }
+        .animate-nav-wave-4 { animation: navWave 1.2s ease-in-out infinite 0.45s; }
+        .animate-nav-wave-5 { animation: navWave 1.2s ease-in-out infinite 0.6s; }
+      `}</style>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo (Left) */}
-          <div className="flex-shrink-0 flex items-center">
-            <Link
-              href="/welcome"
-              className="font-heading text-2xl font-extrabold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent transition duration-300 hover:scale-[1.03]"
-            >
-              AudioWave
-            </Link>
-          </div>
-
-          {/* Links (Center - Desktop) */}
-          <div className="hidden md:flex items-center space-x-8">
-            {navLinks.map((link) => {
-              const isActive = pathname.startsWith(link.href);
-              return (
-                <Link
-                  key={link.name}
-                  href={link.href}
-                  className={`font-body text-sm font-medium transition duration-200 ${
-                    isActive
-                      ? "text-[var(--accent-cyan)] drop-shadow-[0_0_8px_rgba(0,212,255,0.4)]"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  {link.name}
-                </Link>
-              );
-            })}
-          </div>
-
-          {/* User Profile & Logout (Right - Desktop) */}
-          <div className="hidden md:flex items-center space-x-4">
-            {user && (
-              <div className="flex items-center space-x-3 bg-[rgba(255,255,255,0.03)] px-3 py-1.5 rounded-lg border border-[var(--glass-border)]">
-                {user.photoURL ? (
-                  <Image
-                    src={user.photoURL}
-                    alt={user.displayName || "User"}
-                    width={24}
-                    height={24}
-                    unoptimized
-                    className="w-6 h-6 rounded-full border border-[var(--accent-cyan)]"
-                  />
-                ) : (
-                  <div className="w-6 h-6 rounded-full bg-[var(--accent-violet)] flex items-center justify-center text-xs font-semibold text-white">
-                    {user.displayName?.charAt(0) || user.email?.charAt(0) || "U"}
-                  </div>
-                )}
-                <span className="font-body text-xs font-medium text-[var(--text-secondary)] max-w-[120px] truncate">
-                  {user.displayName || user.email}
+          {/* Logo and Nav Links (Left - Desktop) */}
+          <div className="flex items-center space-x-10">
+            {/* Logo (Left) */}
+            <div className="flex-shrink-0 flex items-center">
+              <Link
+                href="/welcome"
+                className="flex items-center gap-2.5 group transition duration-300 hover:scale-[1.02]"
+              >
+                {/* Animated Premium Glass Waveform Logo */}
+                <div className="flex gap-0.5 items-end justify-center h-6 w-7 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.08)] px-1.5 py-1 rounded-md shadow-inner backdrop-blur-sm">
+                  <span className="w-0.5 bg-gradient-to-t from-[var(--accent-cyan)] to-[var(--accent-violet)] rounded-full animate-nav-wave-1" style={{ height: "40%" }} />
+                  <span className="w-0.5 bg-gradient-to-t from-[var(--accent-cyan)] to-[var(--accent-violet)] rounded-full animate-nav-wave-2" style={{ height: "70%" }} />
+                  <span className="w-0.5 bg-gradient-to-t from-[var(--accent-cyan)] to-[var(--accent-violet)] rounded-full animate-nav-wave-3" style={{ height: "100%" }} />
+                  <span className="w-0.5 bg-gradient-to-t from-[var(--accent-cyan)] to-[var(--accent-violet)] rounded-full animate-nav-wave-4" style={{ height: "60%" }} />
+                  <span className="w-0.5 bg-gradient-to-t from-[var(--accent-cyan)] to-[var(--accent-violet)] rounded-full animate-nav-wave-5" style={{ height: "30%" }} />
+                </div>
+                <span className="font-heading text-xl font-black bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent tracking-wider">
+                  AudioWave
                 </span>
-              </div>
-            )}
+              </Link>
+            </div>
 
+            {/* Links (Desktop) */}
+            <div className="hidden md:flex items-center space-x-2">
+              {navLinks.map((link) => {
+                const isActive = pathname.startsWith(link.href);
+                return (
+                  <Link
+                    key={link.name}
+                    href={link.href}
+                    className={`font-body text-xs font-semibold tracking-wider uppercase px-3 py-1.5 rounded-xl transition-all duration-300 border ${
+                      isActive
+                        ? "bg-[rgba(0,212,255,0.06)] border-[rgba(0,212,255,0.25)] text-[var(--accent-cyan)] shadow-[0_0_15px_rgba(0,212,255,0.15)]"
+                        : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.08)]"
+                    }`}
+                  >
+                    {link.name}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* User Profile & Dropdown (Right - Desktop) */}
+          <div className="hidden md:flex items-center space-x-4 relative">
             <button
-              onClick={handleLogout}
-              className="font-body text-xs py-1.5 px-3 border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] hover:bg-[rgba(239,68,68,0.15)] text-[var(--error)] rounded-lg font-medium transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center space-x-2 bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] px-3 py-1.5 rounded-full border border-[var(--glass-border)] transition duration-200"
             >
-              Logout
+              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[var(--accent-cyan)] to-[var(--accent-violet)] flex items-center justify-center text-xs shadow-[0_0_8px_rgba(0,212,255,0.3)] border border-white/20 animate-pulse">
+                🤖
+              </div>
+              <span className="font-body text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                Roboshi
+              </span>
+              <span className="text-[10px] opacity-60">▼</span>
             </button>
+
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsDropdownOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-48 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-xl shadow-2xl p-1.5 z-50 backdrop-blur-lg flex flex-col gap-0.5">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-[var(--text-muted)] tracking-wider border-b border-[var(--glass-border)] mb-1">
+                    ACCOUNT
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      setIsSettingsOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-body text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] text-left transition"
+                  >
+                    ⚙️ Settings
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      handleLogout();
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-body text-[var(--error)] hover:bg-[rgba(239,68,68,0.08)] text-left transition"
+                  >
+                    🚪 Log Out
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Hamburger Menu Toggle (Mobile) */}
@@ -142,23 +188,12 @@ export default function Navbar() {
           <div className="border-t border-[var(--glass-border)] pt-3 flex flex-col space-y-3">
             {user && (
               <div className="flex items-center space-x-3 px-3 py-1.5">
-                {user.photoURL ? (
-                  <Image
-                    src={user.photoURL}
-                    alt={user.displayName || "User"}
-                    width={32}
-                    height={32}
-                    unoptimized
-                    className="w-8 h-8 rounded-full border border-[var(--accent-cyan)]"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-[var(--accent-violet)] flex items-center justify-center text-sm font-semibold text-white">
-                    {user.displayName?.charAt(0) || user.email?.charAt(0) || "U"}
-                  </div>
-                )}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[var(--accent-cyan)] to-[var(--accent-violet)] flex items-center justify-center text-sm shadow-[0_0_8px_rgba(0,212,255,0.3)] border border-white/20">
+                  🤖
+                </div>
                 <div className="flex flex-col">
                   <span className="font-body text-xs font-semibold text-[var(--text-primary)]">
-                    {user.displayName || "AudioWave User"}
+                    Roboshi
                   </span>
                   <span className="font-body text-[10px] text-[var(--text-secondary)] truncate max-w-[200px]">
                     {user.email}
@@ -168,7 +203,20 @@ export default function Navbar() {
             )}
 
             <button
-              onClick={handleLogout}
+              onClick={() => {
+                setIsOpen(false);
+                setIsSettingsOpen(true);
+              }}
+              className="w-full font-body text-xs py-2 px-3 text-center border border-[var(--glass-border)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.08)] text-[var(--text-primary)] rounded-lg font-medium transition"
+            >
+              ⚙️ Settings
+            </button>
+
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                handleLogout();
+              }}
               className="w-full font-body text-xs py-2 px-3 text-center border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] hover:bg-[rgba(239,68,68,0.15)] text-[var(--error)] rounded-lg font-medium transition"
             >
               Logout
@@ -176,6 +224,137 @@ export default function Navbar() {
           </div>
         </div>
       )}
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          >
+            <div
+              className="absolute inset-0"
+              onClick={() => setIsSettingsOpen(false)}
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-2xl flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              {/* Close Button */}
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="absolute top-4 right-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-lg transition"
+                aria-label="Close settings"
+              >
+                ✕
+              </button>
+
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-[rgba(0,212,255,0.08)] flex items-center justify-center border border-[rgba(0,212,255,0.2)] text-[var(--accent-cyan)] text-lg">
+                  ⚙️
+                </div>
+                <div>
+                  <h3 className="font-heading text-lg font-bold text-[var(--text-primary)]">
+                    Settings
+                  </h3>
+                  <p className="font-body text-[10px] text-[var(--text-muted)]">
+                    Information & Policy Overview
+                  </p>
+                </div>
+              </div>
+
+              {/* Tabs navigation */}
+              <div className="flex border-b border-[var(--glass-border)] mb-5">
+                <button
+                  onClick={() => setSettingsTab("about")}
+                  className={`flex-1 pb-2.5 text-xs font-semibold font-body border-b-2 transition ${
+                    settingsTab === "about"
+                      ? "border-[var(--accent-cyan)] text-[var(--text-primary)]"
+                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  About Us
+                </button>
+                <button
+                  onClick={() => setSettingsTab("privacy")}
+                  className={`flex-1 pb-2.5 text-xs font-semibold font-body border-b-2 transition ${
+                    settingsTab === "privacy"
+                      ? "border-[var(--accent-cyan)] text-[var(--text-primary)]"
+                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  Privacy Policy
+                </button>
+              </div>
+
+              {/* Tab Contents */}
+              <div className="flex-1 overflow-y-auto pr-1 space-y-4 font-body text-xs leading-relaxed text-[var(--text-secondary)]">
+                {settingsTab === "about" ? (
+                  <div className="space-y-4">
+                    <p>
+                      <strong>AudioWave</strong> is a premium, AI-integrated browser utility engineered for high-performance audio separation and editing. We empower musicians, sound designers, and content creators with advanced editing capabilities directly on the web.
+                    </p>
+                    <p>
+                      Our key features include:
+                    </p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li><strong>AI Audio Splitter</strong>: Separate music into vocals, drums, bass, and instrumental stems using cutting-edge deep learning.</li>
+                      <li><strong>Waveform Audio Editor</strong>: High-fidelity waveform decoding, non-adjacent merging, precise cursor cutting, and batch WAV exports.</li>
+                      <li><strong>Local Browser Audio Engine</strong>: File imports, waveform visualization, and buffer slicing are processed entirely on-device, offering instant speed and 100% offline capability.</li>
+                    </ul>
+                    <p className="text-[var(--text-muted)] pt-2 border-t border-[rgba(255,255,255,0.05)]">
+                      Version 2.0.0 · Powered by Next.js & Web Audio API
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3.5">
+                    <p>
+                      Your privacy is extremely important to us. Here is how we collect, process, and protect your data:
+                    </p>
+                    <div>
+                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">📁 Audio Processing Privacy</h4>
+                      <p>
+                        All song files loaded into the Audio Editor are decoded and processed <strong>entirely locally</strong> inside your web browser. Your music files never leave your computer and are never uploaded to any remote server.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">🔗 AI Separation Pipeline</h4>
+                      <p>
+                        When using the AI Splitter, files are uploaded securely over SSL to our dedicated inference queue, processed, and the resulting stems are returned. All source files and output stems are automatically deleted immediately after download.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">💾 State Retention & Storage</h4>
+                      <p>
+                        We store project preferences, selection states, and timelines in your browser&apos;s local and session storage to provide a seamless refresh persistence.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">🛡️ No Ad Tracking</h4>
+                      <p>
+                        AudioWave does not use advertising tracking scripts, tracking cookies, or share user details with third-party marketing services.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Close Button Footer */}
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="mt-6 w-full py-2.5 font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] hover:from-[var(--accent-cyan)] hover:to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:scale-[1.01] active:scale-[0.99] transition transform text-xs"
+              >
+                Close Settings
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </nav>
   );
 }
