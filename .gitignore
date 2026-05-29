@@ -40,4 +40,6 @@ app.zip
 api.md
 /api.md
 
-
+# Custom Binaries
+/backend/fpcalc
+/backend/fpcalc.exe

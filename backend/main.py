@@ -3,14 +3,20 @@ main.py
 AudioWave FastAPI backend — all API routes.
 """
 
+import asyncio
 import json
 import logging
 import os
 import shutil
 import tempfile
+import time
 import uuid
 
-import magic
+try:
+    import magic
+except ImportError:
+    magic = None
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -383,6 +389,8 @@ async def validate_upload(file: UploadFile) -> bytes:
     file_ext = os.path.splitext(file.filename.lower())[1] if file.filename else ""
     
     try:
+        if magic is None:
+            raise ImportError("magic module not loaded")
         if not hasattr(magic, "from_buffer"):
             import importlib
             importlib.reload(magic)
