@@ -6,7 +6,7 @@ import tempfile
 import requests
 
 # AudD test token
-API_TOKEN = "test"
+API_TOKEN = "521efa9ebac910b5851dc96a520904cd"
 SAMPLE_DIR = r"C:\Users\kathir\Desktop\tharun important files\song_splitter\sample song"
 
 def _extract_clip_bytes_ffmpeg(filepath: str, skip_sec: int, clip_sec: int) -> bytes | None:

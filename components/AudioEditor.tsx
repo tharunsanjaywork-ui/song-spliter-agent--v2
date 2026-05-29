@@ -53,6 +53,54 @@ function concatenateAudioBuffers(ctx: AudioContext, buffers: AudioBuffer[]): Aud
   return merged;
 }
 
+/**
+ * Convert an AudioBuffer into a playable WAV Blob.
+ * Uses typed arrays instead of per-sample DataView writes for 10-50x faster performance.
+ */
+function bufferToWavBlob(buffer: AudioBuffer): Blob {
+  const numCh = buffer.numberOfChannels;
+  const sr = buffer.sampleRate;
+  const len = buffer.length;
+  const bps = 2; // 16-bit
+  const dataSize = len * numCh * bps;
+
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+
+  // WAV header
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);         // PCM
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sr, true);
+  view.setUint32(28, sr * numCh * bps, true);
+  view.setUint16(32, numCh * bps, true);
+  view.setUint16(34, 16, true);        // bits per sample
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  // Use Int16Array view for bulk writes — much faster than DataView per-sample
+  const samples = new Int16Array(ab, 44);
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < numCh; ch++) {
+    channels.push(buffer.getChannelData(ch));
+  }
+
+  let idx = 0;
+  for (let i = 0; i < len; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      const s = Math.max(-1, Math.min(1, channels[ch][i]));
+      samples[idx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+  }
+
+  return new Blob([ab], { type: "audio/wav" });
+}
+
 // ─── Toolbar Button ───────────────────────────────────────────────────────────
 
 function ToolbarBtn({
@@ -183,8 +231,8 @@ function EditorDropZone({ dragOver, onDragOver, onDragLeave, onDrop, onClick }: 
       transition={dragOver ? { duration: 0.2 } : { borderColor: { duration: 2, repeat: Infinity, ease: "easeInOut" }, scale: { duration: 0.2 } }}
       className="w-full max-w-xl border-2 border-dashed rounded-2xl p-16 flex flex-col items-center justify-center cursor-pointer select-none">
       <span className="text-5xl mb-4">{dragOver ? "⬇️" : "🎵"}</span>
-      <p className="font-heading text-xl font-bold text-[var(--text-primary)] mb-2">Drop your audio file here</p>
-      <p className="font-body text-sm text-[var(--text-secondary)]">or click to choose a file</p>
+      <p className="font-heading text-xl font-bold text-[var(--text-primary)] mb-2">Drop your audio files here</p>
+      <p className="font-body text-sm text-[var(--text-secondary)]">or click to choose files (select multiple)</p>
       <p className="font-mono text-xs text-[var(--text-muted)] mt-3">MP3 · WAV · OGG · FLAC · AAC · M4A</p>
     </motion.div>
   );
@@ -206,9 +254,12 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const [dragOver, setDragOver] = useState(false);
   const [waveReady, setWaveReady] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("Decoding audio…");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [cutFlash, setCutFlash] = useState<{ xPct: number } | null>(null);
   const [tooltipStep, setTooltipStep] = useState<number>(0);
+  // Counter to force WaveSurfer recreation even if blob identity is tricky
+  const [waveVersion, setWaveVersion] = useState(0);
 
   // Manage beginner tooltip sequence transitions
   useEffect(() => {
@@ -241,13 +292,14 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     if (!initialFileUrl) return;
     const run = async () => {
       setLoading(true);
+      setLoadingMsg("Fetching audio from server…");
       try {
         const blob = await fetch(initialFileUrl).then((r) => r.blob());
         const file = new File([blob], initialFileName ?? "track.mp3", { type: blob.type || "audio/mpeg" });
         await loadFiles([file]);
+        // Don't setLoading(false) here — WaveSurfer "ready" event will handle it
       } catch {
         setErrorMsg("Failed to load audio from the server.");
-      } finally {
         setLoading(false);
       }
     };
@@ -260,6 +312,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const loadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
     setLoading(true);
+    setLoadingMsg("Decoding audio…");
     setWaveReady(false);
     setSegments([]);
     setSelectedIds(new Set());
@@ -285,6 +338,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       let currentStart = 0;
       
       for (let i = 0; i < files.length; i++) {
+        setLoadingMsg(`Decoding file ${i + 1} of ${files.length}…`);
         const file = files[i];
         const ab = await file.arrayBuffer();
         const decoded = await ctx.decodeAudioData(ab);
@@ -298,39 +352,59 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         currentStart += decoded.duration;
       }
       
-      if (files.length === 1) {
+      if (decodedBuffers.length === 1) {
+        // Single file: use original file directly (fast path — no WAV conversion)
         setAudioBuffer(decodedBuffers[0]);
         setDuration(decodedBuffers[0].duration);
         setSegments(newSegments);
         setAudioFile(files[0]);
+        setWaveVersion((v) => v + 1);
+        // Don't set loading=false here — let WaveSurfer "ready" event do it
         return;
       }
       
+      // Multiple files: merge into single AudioBuffer and create WAV blob for WaveSurfer
+      setLoadingMsg("Merging audio tracks…");
       const merged = concatenateAudioBuffers(ctx, decodedBuffers);
-      const wavBytes = audioBufferToWav(merged);
-      const wavBlob = new Blob([wavBytes], { type: "audio/wav" });
-      const mergedFile = new File([wavBlob], files[0].name.replace(/\.[^.]+$/, "") + "_merged.wav", { type: "audio/wav" });
-      
+
+      setLoadingMsg("Building combined WAV…");
+      // Run WAV conversion in a microtask to let React paint the "Building" message
+      await new Promise((r) => setTimeout(r, 50));
+      const wavBlob = bufferToWavBlob(merged);
+      const mergedFile = new File(
+        [wavBlob],
+        files[0].name.replace(/\.[^.]+$/, "") + "_merged.wav",
+        { type: "audio/wav" }
+      );
+
       setAudioBuffer(merged);
       setDuration(merged.duration);
       setSegments(newSegments);
       setAudioFile(mergedFile);
+      setWaveVersion((v) => v + 1);
+      // Don't set loading=false here — WaveSurfer "ready" event will do it
     } catch (err) {
       console.error("Decoding error:", err);
       setErrorMsg("Failed to decode one or more audio files. Please ensure they are valid audio files.");
-    } finally {
       setLoading(false);
     }
   }, []);
 
   // ── WaveSurfer ────────────────────────────────────────────────────────────────
+  // Recreates whenever audioFile changes (waveVersion forces recreation)
 
   useEffect(() => {
     if (!audioFile || !waveContainerRef.current) return;
-    let ws: typeof wavesurferRef.current;
+
+    let cancelled = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let ws: any = null;
+    const container = waveContainerRef.current;
+
     import("wavesurfer.js").then(({ default: WaveSurfer }) => {
+      if (cancelled) return;
       ws = WaveSurfer.create({
-        container: waveContainerRef.current!,
+        container,
         waveColor: "#1E3A4A",
         progressColor: "#00D4FF",
         cursorColor: "#FF6B35",
@@ -338,16 +412,41 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         normalize: true,
         interact: true,
       });
-      ws.on("timeupdate", (t: number) => setCursorTime(t));
-      ws.on("ready", () => setWaveReady(true));
-      ws.on("play", () => setIsPlaying(true));
-      ws.on("pause", () => setIsPlaying(false));
-      ws.on("finish", () => setIsPlaying(false));
+
+      ws.on("ready", () => {
+        if (!cancelled) {
+          setWaveReady(true);
+          setLoading(false); // Now safe to dismiss overlay — waveform is rendered & playable
+        }
+      });
+
+      ws.on("error", (err: Error) => {
+        console.error("WaveSurfer error:", err);
+        if (!cancelled) {
+          setErrorMsg("Failed to load audio waveform. Try a different file.");
+          setLoading(false);
+        }
+      });
+
+      ws.on("timeupdate", (t: number) => { if (!cancelled) setCursorTime(t); });
+      ws.on("play", () => { if (!cancelled) setIsPlaying(true); });
+      ws.on("pause", () => { if (!cancelled) setIsPlaying(false); });
+      ws.on("finish", () => { if (!cancelled) setIsPlaying(false); });
+
       ws.loadBlob(audioFile);
       wavesurferRef.current = ws;
     });
-    return () => { ws?.destroy(); wavesurferRef.current = null; setWaveReady(false); };
-  }, [audioFile]);
+
+    return () => {
+      cancelled = true;
+      if (ws) {
+        ws.destroy();
+      }
+      wavesurferRef.current = null;
+      setWaveReady(false);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioFile, waveVersion]);
 
   // ── File validation ───────────────────────────────────────────────────────────
 
@@ -387,6 +486,8 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     if (files && files.length > 0) {
       await validateAndLoadFiles(Array.from(files));
     }
+    // Reset input so the same file can be selected again
+    if (e.target) e.target.value = "";
   };
 
   // ── Undo helper ───────────────────────────────────────────────────────────────
@@ -528,28 +629,65 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   // ── Add File ──────────────────────────────────────────────────────────────────
 
   const handleAddFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !audioBuffer || !audioCtxRef.current) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !audioBuffer || !audioCtxRef.current) return;
+
+    // Reset input immediately so the same file can be selected again
+    const input = e.target;
+    
     setLoading(true);
+    setLoadingMsg("Decoding new file(s)…");
     try {
-      const decoded = await audioCtxRef.current.decodeAudioData(await file.arrayBuffer());
-      const newDur = duration + decoded.duration;
-      
-      const merged = concatenateAudioBuffers(audioCtxRef.current, [audioBuffer, decoded]);
-      
-      // Generate WAV file so WaveSurfer can reload and play the combined track
-      const wavBytes = audioBufferToWav(merged);
-      const wavBlob = new Blob([wavBytes], { type: "audio/wav" });
-      const newFile = new File([wavBlob], audioFile?.name || "merged_audio.wav", { type: "audio/wav" });
-      
+      const ctx = audioCtxRef.current;
+      const newBuffers: AudioBuffer[] = [];
+      const newSegs: Segment[] = [];
+      let runningEnd = duration;
+
+      // Decode all added files
+      for (let i = 0; i < files.length; i++) {
+        setLoadingMsg(`Decoding added file ${i + 1} of ${files.length}…`);
+        const file = files[i];
+        const ab = await file.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(ab);
+        newBuffers.push(decoded);
+        newSegs.push({
+          id: uid(),
+          name: file.name ? file.name.replace(/\.[^.]+$/, "") : `Added Track ${i + 1}`,
+          startSec: runningEnd,
+          endSec: runningEnd + decoded.duration,
+        });
+        runningEnd += decoded.duration;
+      }
+
+      // Merge existing buffer + all new buffers
+      setLoadingMsg("Merging audio tracks…");
+      const allBuffers = [audioBuffer, ...newBuffers];
+      const merged = concatenateAudioBuffers(ctx, allBuffers);
+
+      // Build WAV blob for WaveSurfer to play the full combined track
+      setLoadingMsg("Building combined WAV…");
+      await new Promise((r) => setTimeout(r, 50)); // Let React paint
+      const wavBlob = bufferToWavBlob(merged);
+      const newFile = new File(
+        [wavBlob],
+        "combined_audio.wav",
+        { type: "audio/wav" }
+      );
+
+      // Update all state
       setAudioBuffer(merged);
-      setDuration(newDur);
-      setSegments((p) => [...p, { id: uid(), name: file.name.replace(/\.[^.]+$/, ""), startSec: duration, endSec: newDur }]);
+      setDuration(runningEnd);
+      setSegments((prev) => [...prev, ...newSegs]);
       setAudioFile(newFile);
-    } catch {
-      setErrorMsg("Failed to decode the added file.");
-    } finally {
+      setWaveVersion((v) => v + 1);
+      // Loading overlay stays until WaveSurfer fires "ready"
+    } catch (err) {
+      console.error("Add file error:", err);
+      setErrorMsg("Failed to decode the added file. Please try a different audio file.");
       setLoading(false);
+    } finally {
+      // Reset input so the same file can be selected again
+      input.value = "";
     }
   };
 
@@ -573,7 +711,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} />
-          {loading && <p className="font-body text-sm text-[var(--text-secondary)] mt-6 animate-pulse">Decoding audio…</p>}
+          {loading && <p className="font-body text-sm text-[var(--text-secondary)] mt-6 animate-pulse">{loadingMsg}</p>}
           {errorMsg && <p className="font-body text-sm text-[var(--error)] mt-4 text-center max-w-sm">{errorMsg}</p>}
         </main>
       </div>
@@ -590,7 +728,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center flex-col gap-4">
             <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
             <p className="font-body text-sm text-[var(--text-secondary)] animate-pulse">
-              Processing combined timeline...
+              {loadingMsg}
             </p>
           </div>
         )}
@@ -706,7 +844,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
 
           {/* Toolbar */}
           <div className="flex items-center gap-1 px-3 py-2 border-b border-[var(--glass-border)] bg-[var(--bg-surface)] overflow-x-auto flex-shrink-0">
-            <input ref={addFileInputRef} type="file" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a" className="hidden" onChange={handleAddFile} />
+            <input ref={addFileInputRef} type="file" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a" className="hidden" onChange={handleAddFile} multiple />
             <div className="relative">
               <ToolbarBtn icon="✂️" label="Cut" onClick={handleCut} disabled={!waveReady} delay={0.05} />
               {tooltipStep === 2 && (
