@@ -3,9 +3,10 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { getKeysStatus } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import Navbar from "@/components/Navbar";
+import { doc, getDoc } from "firebase/firestore";
+import { getFirebaseDb } from "@/lib/firebase";
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -25,8 +26,12 @@ export default function WelcomePage() {
     setCheckingSetup(true);
     setError(null);
     try {
-      const response = await getKeysStatus();
-      if (response.success && response.setupComplete) {
+      // Client-side Firestore check — no backend cold start needed
+      const userDocRef = doc(getFirebaseDb(), "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      const setupComplete = userDocSnap.exists() ? userDocSnap.data()?.setupComplete : false;
+      
+      if (setupComplete) {
         // Redirect directly to upload page
         router.push("/generator/upload");
       } else {
