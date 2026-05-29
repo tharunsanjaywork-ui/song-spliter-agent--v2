@@ -8,7 +8,7 @@ import { useGeneratorContext } from "@/context/GeneratorContext";
 import { useAuth } from "@/hooks/useAuth";
 import { wakeupServer } from "@/lib/api";
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getFirebaseDb } from "@/lib/firebase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -220,7 +220,7 @@ export default function GeneratorUploadPage() {
     const checkStatusAndWakeup = async () => {
       try {
         // Client-side Firestore check — no backend cold start needed
-        const userDocRef = doc(db, "users", user.uid);
+        const userDocRef = doc(getFirebaseDb(), "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         const setupComplete = userDocSnap.exists() ? userDocSnap.data()?.setupComplete : false;
         if (!setupComplete) {
