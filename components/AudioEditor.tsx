@@ -104,10 +104,21 @@ function bufferToWavBlob(buffer: AudioBuffer): Blob {
 // ─── Toolbar Button ───────────────────────────────────────────────────────────
 
 function ToolbarBtn({
-  icon, label, onClick, disabled, delay = 0,
+  icon, label, onClick, disabled, disabledReason, delay = 0,
 }: {
-  icon: string; label: string; onClick: () => void; disabled?: boolean; delay?: number;
+  icon: string; label: string; onClick: () => void; disabled?: boolean; disabledReason?: string; delay?: number;
 }) {
+  const [showHint, setShowHint] = React.useState(false);
+
+  const handleClick = () => {
+    if (disabled && disabledReason) {
+      setShowHint(true);
+      setTimeout(() => setShowHint(false), 2500);
+      return;
+    }
+    if (!disabled) onClick();
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -116,23 +127,43 @@ function ToolbarBtn({
       className="relative group"
     >
       <button
-        onClick={onClick}
-        disabled={disabled}
+        onClick={handleClick}
         aria-label={label}
         className={`flex flex-col items-center gap-1 px-3 py-2.5 rounded-xl border text-xs font-body transition
           ${disabled
-            ? "opacity-30 cursor-not-allowed border-transparent"
+            ? "opacity-40 cursor-pointer border-transparent"
             : "border-[var(--glass-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)]"
           }`}
       >
         <span className="text-base leading-none">{icon}</span>
         <span className="hidden sm:block">{label}</span>
       </button>
+      {/* Tooltip: show label when enabled, show disabled reason when disabled */}
       <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">
-        <div className="bg-[var(--bg-surface)] border border-[var(--glass-border)] text-[var(--text-secondary)] text-[10px] font-body px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
-          {label}
+        <div className={`border text-[10px] font-body px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg ${
+          disabled
+            ? "bg-[rgba(239,68,68,0.1)] border-[rgba(239,68,68,0.25)] text-[var(--error)]"
+            : "bg-[var(--bg-surface)] border-[var(--glass-border)] text-[var(--text-secondary)]"
+        }`}>
+          {disabled && disabledReason ? disabledReason : label}
         </div>
       </div>
+      {/* Click hint toast for disabled buttons */}
+      <AnimatePresence>
+        {showHint && disabledReason && (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)] px-3 py-2 rounded-xl shadow-xl w-max max-w-[220px]"
+          >
+            <p className="font-body text-[11px] text-[var(--error)] text-center leading-snug">
+              {disabledReason}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -285,6 +316,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wavesurferRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const lastAnchorIdx = useRef<number>(0); // Anchor index for Shift range selection
 
   // ── Load initial URL (from generator/editor) ─────────────────────────────────
 
@@ -529,26 +561,83 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   }, [waveReady, cursorTime, duration, segments, pushUndo]);
 
   // ── Merge ─────────────────────────────────────────────────────────────────────
+  // Supports non-adjacent segments: rearranges the AudioBuffer so merged audio
+  // is contiguous, then recomputes all segment timings.
 
-  const handleMerge = useCallback(() => {
-    if (selectedIds.size < 2) { setErrorMsg("Select two blocks to merge them."); return; }
-    const indices = segments.map((s, i) => (selectedIds.has(s.id) ? i : -1)).filter((i) => i !== -1);
-    for (let i = 0; i < indices.length - 1; i++) {
-      if (indices[i + 1] !== indices[i] + 1) {
-        setErrorMsg("You can only merge blocks that are next to each other.");
-        return;
-      }
-    }
+  const handleMerge = useCallback(async () => {
+    if (selectedIds.size < 2) { setErrorMsg("Select at least 2 segments to merge."); return; }
+    if (!audioBuffer || !audioCtxRef.current) return;
+
     pushUndo();
-    const first = segments[indices[0]];
-    const last = segments[indices[indices.length - 1]];
-    const merged: Segment = { id: uid(), name: first.name, startSec: first.startSec, endSec: last.endSec };
-    const rest = segments.filter((s) => !selectedIds.has(s.id));
-    rest.splice(indices[0], 0, merged);
-    setSegments(rest);
-    setSelectedIds(new Set());
-    setErrorMsg(null);
-  }, [selectedIds, segments, pushUndo]);
+    setLoading(true);
+    setLoadingMsg("Merging segments…");
+
+    try {
+      const ctx = audioCtxRef.current;
+      const selectedSegs = segments.filter((s) => selectedIds.has(s.id));
+      const mergedDuration = selectedSegs.reduce((sum, s) => sum + (s.endSec - s.startSec), 0);
+
+      // Build the new segment order:
+      // Replace the FIRST selected segment with the merged one, skip the rest
+      const audioClips: AudioBuffer[] = [];
+      const newSegments: Segment[] = [];
+      let mergedInserted = false;
+      let runningTime = 0;
+
+      for (const seg of segments) {
+        if (selectedIds.has(seg.id)) {
+          if (!mergedInserted) {
+            // Extract audio from ALL selected segments (in timeline order)
+            for (const selSeg of selectedSegs) {
+              audioClips.push(sliceAudioBuffer(ctx, audioBuffer, selSeg.startSec, selSeg.endSec));
+            }
+            newSegments.push({
+              id: uid(),
+              name: selectedSegs[0].name,
+              startSec: runningTime,
+              endSec: runningTime + mergedDuration,
+            });
+            runningTime += mergedDuration;
+            mergedInserted = true;
+          }
+          // Skip other selected segments (their audio is already in the merged clip)
+        } else {
+          // Non-selected segment: extract its audio and keep it
+          const dur = seg.endSec - seg.startSec;
+          audioClips.push(sliceAudioBuffer(ctx, audioBuffer, seg.startSec, seg.endSec));
+          newSegments.push({
+            id: seg.id,
+            name: seg.name,
+            startSec: runningTime,
+            endSec: runningTime + dur,
+          });
+          runningTime += dur;
+        }
+      }
+
+      // Build the new AudioBuffer from the rearranged clips
+      const newBuffer = concatenateAudioBuffers(ctx, audioClips);
+
+      // Build WAV blob for WaveSurfer
+      setLoadingMsg("Rebuilding waveform…");
+      await new Promise((r) => setTimeout(r, 50));
+      const wavBlob = bufferToWavBlob(newBuffer);
+      const newFile = new File([wavBlob], "merged_audio.wav", { type: "audio/wav" });
+
+      setAudioBuffer(newBuffer);
+      setDuration(newBuffer.duration);
+      setSegments(newSegments);
+      setSelectedIds(new Set());
+      setAudioFile(newFile);
+      setWaveVersion((v) => v + 1);
+      setErrorMsg(null);
+      // Loading overlay stays until WaveSurfer "ready" fires
+    } catch (err) {
+      console.error("Merge error:", err);
+      setErrorMsg("Failed to merge segments. Please try again.");
+      setLoading(false);
+    }
+  }, [selectedIds, segments, pushUndo, audioBuffer]);
 
   // ── Undo ──────────────────────────────────────────────────────────────────────
 
@@ -612,19 +701,47 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     setEditingId(null);
   }, [editingId, editValue]);
 
-  // ── Selection ─────────────────────────────────────────────────────────────────
+  // ── Selection (Windows-style: Click=single, Ctrl=toggle, Shift=range) ───────
 
   const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (e.shiftKey || e.ctrlKey || e.metaKey) {
-        if (next.has(id)) next.delete(id); else next.add(id);
+    const clickedIdx = segments.findIndex((s) => s.id === id);
+    if (clickedIdx === -1) return;
+
+    if (e.shiftKey) {
+      // Shift+Click: range select from anchor to clicked
+      const anchor = Math.min(lastAnchorIdx.current, segments.length - 1);
+      const lo = Math.min(anchor, clickedIdx);
+      const hi = Math.max(anchor, clickedIdx);
+      const rangeIds = new Set<string>();
+      for (let i = lo; i <= hi; i++) rangeIds.add(segments[i].id);
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+Shift: ADD range to existing selection
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          rangeIds.forEach((rid) => next.add(rid));
+          return next;
+        });
       } else {
-        if (next.size === 1 && next.has(id)) next.clear(); else { next.clear(); next.add(id); }
+        // Shift only: REPLACE selection with range
+        setSelectedIds(rangeIds);
       }
-      return next;
-    });
-  }, []);
+    } else if (e.ctrlKey || e.metaKey) {
+      // Ctrl+Click: toggle individual item
+      lastAnchorIdx.current = clickedIdx;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+    } else {
+      // Plain click: single select (deselect all others)
+      lastAnchorIdx.current = clickedIdx;
+      setSelectedIds((prev) => {
+        if (prev.size === 1 && prev.has(id)) return new Set<string>();
+        return new Set([id]);
+      });
+    }
+  }, [segments]);
 
   // ── Add File ──────────────────────────────────────────────────────────────────
 
@@ -846,7 +963,10 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
           <div className="flex items-center gap-1 px-3 py-2 border-b border-[var(--glass-border)] bg-[var(--bg-surface)] overflow-x-auto flex-shrink-0">
             <input ref={addFileInputRef} type="file" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a" className="hidden" onChange={handleAddFile} multiple />
             <div className="relative">
-              <ToolbarBtn icon="✂️" label="Cut" onClick={handleCut} disabled={!waveReady} delay={0.05} />
+              <ToolbarBtn icon="✂️" label="Cut" onClick={handleCut}
+                disabled={!waveReady || cursorTime <= 0 || cursorTime >= duration}
+                disabledReason={!waveReady ? "Wait for audio to load" : "Click the waveform to place cursor first"}
+                delay={0.05} />
               {tooltipStep === 2 && (
                 <AnimatePresence>
                   <motion.div
@@ -863,16 +983,33 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
                 </AnimatePresence>
               )}
             </div>
-            <ToolbarBtn icon="🔗" label="Merge" onClick={handleMerge} disabled={!waveReady || selectedIds.size < 2} delay={0.1} />
-            <ToolbarBtn icon="➕" label="Add File" onClick={() => addFileInputRef.current?.click()} disabled={!waveReady} delay={0.15} />
+            <ToolbarBtn icon="🔗" label="Merge" onClick={handleMerge}
+              disabled={!waveReady || selectedIds.size < 2}
+              disabledReason={!waveReady ? "Wait for audio to load" : "Select 2+ segments (Ctrl+Click or Shift+Click)"}
+              delay={0.1} />
+            <ToolbarBtn icon="➕" label="Add File" onClick={() => addFileInputRef.current?.click()}
+              disabled={!waveReady}
+              disabledReason="Wait for audio to load"
+              delay={0.15} />
             <ToolbarBtn icon="✏️" label="Rename"
               onClick={() => { const id = Array.from(selectedIds)[0]; if (id) startEdit(id); }}
-              disabled={!waveReady || selectedIds.size !== 1} delay={0.2} />
+              disabled={!waveReady || selectedIds.size !== 1}
+              disabledReason={!waveReady ? "Wait for audio to load" : selectedIds.size === 0 ? "Click a segment first" : "Select only 1 segment to rename"}
+              delay={0.2} />
             <div className="w-px h-8 bg-[var(--glass-border)] mx-1 flex-shrink-0" />
-            <ToolbarBtn icon="⬇️" label="Download Selected" onClick={downloadSelected} disabled={!waveReady || !selectedIds.size} delay={0.25} />
-            <ToolbarBtn icon="🗜️" label="Download All" onClick={downloadAll} disabled={!waveReady || !segments.length} delay={0.3} />
+            <ToolbarBtn icon="⬇️" label="Download Selected" onClick={downloadSelected}
+              disabled={!waveReady || !selectedIds.size}
+              disabledReason={!waveReady ? "Wait for audio to load" : "Select segments to download"}
+              delay={0.25} />
+            <ToolbarBtn icon="🗜️" label="Download All" onClick={downloadAll}
+              disabled={!waveReady || !segments.length}
+              disabledReason="Wait for audio to load"
+              delay={0.3} />
             <div className="w-px h-8 bg-[var(--glass-border)] mx-1 flex-shrink-0" />
-            <ToolbarBtn icon="↩️" label="Undo" onClick={handleUndo} disabled={!undoStack.length} delay={0.35} />
+            <ToolbarBtn icon="↩️" label="Undo" onClick={handleUndo}
+              disabled={!undoStack.length}
+              disabledReason="Nothing to undo"
+              delay={0.35} />
             <div className="flex-1" />
             <button onClick={() => { setAudioFile(null); setAudioBuffer(null); setSegments([]); setDuration(0); setWaveReady(false); }}
               className="font-body text-xs text-[var(--text-muted)] hover:text-[var(--error)] px-2 py-1 rounded transition">
