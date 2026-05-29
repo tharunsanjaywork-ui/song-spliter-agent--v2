@@ -25,24 +25,32 @@ function buildDisplayName(file: JobFile, index: number): string {
 
 interface AudioPlayerProps {
   url: string;
+  isActive: boolean;
   isPlaying: boolean;
   onPlayToggle: () => void;
+  initialDuration: number;
 }
 
-function AudioPlayer({ url, isPlaying, onPlayToggle }: AudioPlayerProps) {
+function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }: AudioPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wavesurferRef = useRef<any>(null);
   const [isReady, setIsReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(initialDuration);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!isActive || !containerRef.current) {
+      setIsReady(false);
+      setCurrentTime(0);
+      setDuration(initialDuration);
+      return;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ws: any;
 
     import("wavesurfer.js").then(({ default: WaveSurfer }) => {
+      if (!containerRef.current) return;
       ws = WaveSurfer.create({
         container: containerRef.current!,
         waveColor: "#1E3A4A",        // --waveform-empty
@@ -56,6 +64,9 @@ function AudioPlayer({ url, isPlaying, onPlayToggle }: AudioPlayerProps) {
       ws.on("ready", () => {
         setIsReady(true);
         setDuration(ws.getDuration());
+        if (isPlaying) {
+          ws.play().catch(() => {});
+        }
       });
 
       ws.on("timeupdate", (t: number) => {
@@ -75,17 +86,50 @@ function AudioPlayer({ url, isPlaying, onPlayToggle }: AudioPlayerProps) {
       wavesurferRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [isActive, url]);
 
   useEffect(() => {
     const ws = wavesurferRef.current;
-    if (!ws || !isReady) return;
+    if (!ws || !isReady || !isActive) return;
     if (isPlaying) {
       ws.play().catch(() => {});
     } else {
       ws.pause();
     }
-  }, [isPlaying, isReady]);
+  }, [isPlaying, isReady, isActive]);
+
+  if (!isActive) {
+    return (
+      <div className="flex items-center gap-3 mt-3">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlayToggle();
+          }}
+          aria-label="Play preview"
+          className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.06)] border border-[rgba(255,255,255,0.05)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] hover:border-[rgba(0,212,255,0.3)] hover:bg-[rgba(0,212,255,0.08)] transition flex-shrink-0"
+        >
+          ▶
+        </button>
+        {/* Placeholder waveform visualization */}
+        <div className="flex-1 h-8 flex items-center gap-[3px] opacity-20">
+          {Array.from({ length: 45 }).map((_, i) => {
+            const h = 4 + Math.sin(i * 0.2) * 14 + Math.cos(i * 0.5) * 6;
+            return (
+              <div
+                key={i}
+                className="flex-1 bg-[var(--text-muted)] rounded-full"
+                style={{ height: `${Math.max(4, Math.abs(h))}px` }}
+              />
+            );
+          })}
+        </div>
+        <span className="font-mono text-xs text-[var(--text-muted)] flex-shrink-0">
+          0:00&nbsp;/&nbsp;{formatDuration(initialDuration)}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-3 mt-3">
@@ -95,9 +139,15 @@ function AudioPlayer({ url, isPlaying, onPlayToggle }: AudioPlayerProps) {
           onPlayToggle();
         }}
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.3)] flex items-center justify-center text-[var(--accent-cyan)] hover:bg-[rgba(0,212,255,0.2)] transition flex-shrink-0"
+        className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.3)] flex items-center justify-center text-[var(--accent-cyan)] hover:bg-[rgba(0,212,255,0.2)] transition flex-shrink-0 flex items-center justify-center"
       >
-        {isPlaying ? "⏸" : "▶"}
+        {!isReady ? (
+          <div className="w-3.5 h-3.5 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
+        ) : isPlaying ? (
+          "⏸"
+        ) : (
+          "▶"
+        )}
       </button>
 
       <div ref={containerRef} className="flex-1 min-w-0" />
@@ -161,6 +211,7 @@ interface FileCardProps {
   onRenameCancel: () => void;
   onToggleCheck: () => void;
   renaming: boolean;
+  isActive: boolean;
   isPlaying: boolean;
   onPlayToggle: () => void;
 }
@@ -168,7 +219,7 @@ interface FileCardProps {
 function FileCard({
   file, index, displayName, checked, isEditing, editValue,
   onEditValueChange, onDoubleClickName, onRenameCommit, onRenameCancel,
-  onToggleCheck, renaming, isPlaying, onPlayToggle,
+  onToggleCheck, renaming, isActive, isPlaying, onPlayToggle,
 }: FileCardProps) {
   return (
     <motion.div
@@ -247,7 +298,13 @@ function FileCard({
       </div>
 
       {/* Audio player */}
-      <AudioPlayer url={file.cloudinaryUrl} isPlaying={isPlaying} onPlayToggle={onPlayToggle} />
+      <AudioPlayer
+        url={file.cloudinaryUrl}
+        isActive={isActive}
+        isPlaying={isPlaying}
+        onPlayToggle={onPlayToggle}
+        initialDuration={file.duration}
+      />
     </motion.div>
   );
 }
@@ -626,7 +683,8 @@ function GeneratorPreviewContent() {
   const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
   const [showDownload, setShowDownload] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(true);
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // Load job from API
   useEffect(() => {
@@ -829,12 +887,14 @@ function GeneratorPreviewContent() {
                   onRenameCancel={cancelRename}
                   onToggleCheck={() => handleToggle(i)}
                   renaming={renamingIndex === i}
-                  isPlaying={playingIndex === i}
+                  isActive={activeIndex === i}
+                  isPlaying={activeIndex === i && isPlaying}
                   onPlayToggle={() => {
-                    if (playingIndex === i) {
-                      setPlayingIndex(null);
+                    if (activeIndex === i) {
+                      setIsPlaying(!isPlaying);
                     } else {
-                      setPlayingIndex(i);
+                      setActiveIndex(i);
+                      setIsPlaying(true);
                     }
                   }}
                 />
