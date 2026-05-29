@@ -19,6 +19,18 @@ import { getFirebaseAuth } from "@/lib/firebase";
 import DOMPurify from "dompurify";
 import { useAuth } from "@/hooks/useAuth";
 
+interface Particle {
+  id: number;
+  size: number;
+  startX: number;
+  startY: number;
+  tx: number;
+  ty: number;
+  duration: number;
+  delay: number;
+  color: string;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -39,6 +51,26 @@ export default function LoginPage() {
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
+  const [showPassword, setShowPassword] = useState(false);
+  const [particles, setParticles] = useState<Particle[]>([]);
+
+  useEffect(() => {
+    const count = 25;
+    const colors = ["#00d4ff", "#b8afff"];
+    const newParticles = Array.from({ length: count }).map((_, i) => {
+      const size = Math.random() * 6 + 2;
+      const startX = Math.random() * 100;
+      const startY = Math.random() * 100;
+      const tx = Math.random() * 200 - 100;
+      const ty = Math.random() * 200 - 100;
+      const duration = Math.random() * 15 + 15;
+      const delay = Math.random() * -30;
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      return { id: i, size, startX, startY, tx, ty, duration, delay, color };
+    });
+    setParticles(newParticles);
+  }, []);
+
   // Auto-redirect if user already logged in
   useEffect(() => {
     if (!authLoading && user) {
@@ -54,10 +86,12 @@ export default function LoginPage() {
   }, [activeTab]);
 
   // Shake animation trigger key on error
-  const [shakeKey, setShakeKey] = useState(0);
+  const [isShaking, setIsShaking] = useState(false);
   useEffect(() => {
     if (error) {
-      setShakeKey((prev) => prev + 1);
+      setIsShaking(true);
+      const timer = setTimeout(() => setIsShaking(false), 500);
+      return () => clearTimeout(timer);
     }
   }, [error]);
 
@@ -247,379 +281,427 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] relative overflow-hidden flex items-center justify-center p-4">
-      {/* 20-30 Floating background particles as specified in PRD */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {Array.from({ length: 25 }).map((_, i) => (
+    <div className="text-on-surface min-h-screen w-screen relative overflow-hidden flex items-center justify-center p-margin bg-[#0f0f0f]">
+      {/* Mesh Gradient Background */}
+      <div className="mesh-bg"></div>
+
+      {/* Particle Container */}
+      <div className="absolute inset-0 z-0 overflow-hidden" id="particles">
+        {particles.map((p) => (
           <div
-            key={i}
-            className="absolute bg-[var(--accent-cyan)] rounded-full opacity-[0.03]"
+            key={p.id}
+            className="particle"
             style={{
-              width: `${Math.random() * 8 + 4}px`,
-              height: `${Math.random() * 8 + 4}px`,
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animation: `float ${Math.random() * 20 + 20}s infinite linear`,
-              animationDelay: `${Math.random() * -10}s`,
-            }}
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              left: `${p.startX}vw`,
+              top: `${p.startY}vh`,
+              background: p.color,
+              boxShadow: `0 0 ${Math.random() * 10 + 5}px ${p.color}`,
+              "--tx": `${p.tx}px`,
+              "--ty": `${p.ty}px`,
+              animationDuration: `${p.duration}s`,
+              animationDelay: `${p.delay}s`,
+            } as React.CSSProperties}
           />
         ))}
       </div>
 
-      <style jsx global>{`
-        @keyframes float {
-          0% {
-            transform: translateY(0) translateX(0) scale(1);
-          }
-          50% {
-            transform: translateY(-80px) translateX(40px) scale(1.2);
-          }
-          100% {
-            transform: translateY(0) translateX(0) scale(1);
-          }
-        }
-      `}</style>
-
       {/* Recaptcha Container */}
       <div id="recaptcha-container"></div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+      {/* Top Alert Banner */}
+      <div
+        className={`fixed top-0 left-0 w-full bg-error-container text-on-error-container font-technical-sm text-technical-sm p-sm text-center transform transition-transform duration-300 z-50 flex items-center justify-center gap-2 ${
+          error ? "translate-y-0" : "-translate-y-full"
+        }`}
+        id="error-banner"
       >
-        {/* Main Card */}
-        <motion.div
-          key={shakeKey}
-          animate={error ? { x: [0, -8, 8, -8, 8, 0] } : {}}
-          transition={{ duration: 0.4 }}
-          className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-8 backdrop-blur-md shadow-2xl transition-all duration-300 hover:border-[rgba(0,212,255,0.2)] hover:shadow-[0_0_30px_rgba(0,212,255,0.06)]"
-        >
-          {/* App Brand Header */}
-          <div className="text-center mb-6">
-            <motion.h1
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="font-heading text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent mb-2"
-            >
-              AudioWave
-            </motion.h1>
-            <p className="font-body text-sm text-[var(--text-secondary)] select-none">
-              {"Edit audio. Split mixtapes. Powered by AI.".split("").map((char, index) => (
-                <motion.span
-                  key={index}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.8 + index * 0.02, duration: 0.1 }}
-                >
-                  {char}
-                </motion.span>
-              ))}
+        <span className="material-symbols-outlined text-[16px]">warning</span>
+        <span>{error ? DOMPurify.sanitize(error, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }) : ""}</span>
+      </div>
+
+      {/* Top Success Banner */}
+      <div
+        className={`fixed top-0 left-0 w-full bg-surface-tint/20 border-b border-surface-tint/30 text-primary-fixed font-technical-sm text-technical-sm p-sm text-center transform transition-transform duration-300 z-50 flex items-center justify-center gap-2 ${
+          success ? "translate-y-0" : "-translate-y-full"
+        }`}
+        id="success-banner"
+      >
+        <span className="material-symbols-outlined text-[16px]">check_circle</span>
+        <span>{success ? DOMPurify.sanitize(success, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }) : ""}</span>
+      </div>
+
+      {/* Main Login Card */}
+      <div
+        className={`glass-panel w-full max-w-[420px] rounded-xl p-lg z-10 relative flex flex-col gap-lg border border-outline-variant/30 slide-up ${
+          isShaking ? "shake" : ""
+        }`}
+      >
+        {/* Header */}
+        <div className="text-center flex flex-col gap-sm items-center">
+          <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mb-2 border border-outline-variant hover-glow transition-all hover:scale-110 cursor-pointer">
+            <span className="material-symbols-outlined text-[24px] text-primary">graphic_eq</span>
+          </div>
+          <h1 className="font-display-lg text-display-lg text-gradient tracking-tighter">AudioWave</h1>
+          <div className="h-[20px] flex items-center justify-center">
+            <p className="font-technical-sm text-technical-sm text-on-surface-variant typewriter">
+              Edit audio. Split mixtapes. Powered by AI.
             </p>
           </div>
+        </div>
 
-          {/* Form Selector Tabs */}
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.8, duration: 0.4 }}
-            className="flex bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] rounded-xl p-1 mb-6 animate-stagger-item"
+        {/* Capsule Toggle */}
+        <div className="bg-surface-container-low rounded-full p-1 flex relative text-technical-sm font-technical-sm">
+          <button
+            type="button"
+            onClick={() => setActiveTab("login")}
+            className={`flex-1 py-2 text-center rounded-full transition-all duration-300 z-10 hover:scale-[1.02] ${
+              activeTab === "login"
+                ? "bg-surface-variant text-on-surface shadow-[0_0_10px_rgba(0,212,255,0.15)]"
+                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50"
+            }`}
           >
-            <button
-              onClick={() => setActiveTab("login")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
-                activeTab === "login"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setActiveTab("signup")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
-                activeTab === "signup"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              Sign Up
-            </button>
-            <button
-              onClick={() => setActiveTab("phone")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
-                activeTab === "phone"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              Phone Login
-            </button>
-          </motion.div>
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("signup")}
+            className={`flex-1 py-2 text-center rounded-full transition-all duration-300 z-10 hover:scale-[1.02] ${
+              activeTab === "signup"
+                ? "bg-surface-variant text-on-surface shadow-[0_0_10px_rgba(0,212,255,0.15)]"
+                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50"
+            }`}
+          >
+            Sign Up
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("phone")}
+            className={`flex-1 py-2 text-center rounded-full transition-all duration-300 z-10 hover:scale-[1.02] ${
+              activeTab === "phone"
+                ? "bg-surface-variant text-on-surface shadow-[0_0_10px_rgba(0,212,255,0.15)]"
+                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50"
+            }`}
+          >
+            Phone
+          </button>
+        </div>
 
-          {/* Dynamic Feedbacks */}
-          <AnimatePresence mode="wait">
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="mb-4 p-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[var(--error)] text-xs rounded-xl flex items-start gap-2"
-              >
-                <span>⚠️</span>
-                <span className="font-body">{DOMPurify.sanitize(error, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
-              </motion.div>
-            )}
-
-            {success && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="mb-4 p-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[var(--success)] text-xs rounded-xl flex items-start gap-2"
-              >
-                <span>✅</span>
-                <span className="font-body">{DOMPurify.sanitize(success, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Authentication Forms */}
-          <AnimatePresence mode="wait">
-            {activeTab === "login" && (
-              <motion.form
-                key="login-form"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                onSubmit={handleEmailSignIn}
-                className="space-y-4"
-              >
-                <div className="space-y-1.5 animate-stagger-item" style={{ animationDelay: "1.9s" }}>
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Email Address</label>
+        {/* Forms Container */}
+        <AnimatePresence mode="wait">
+          {activeTab === "login" && (
+            <motion.form
+              key="login"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              onSubmit={handleEmailSignIn}
+              className="flex flex-col gap-md"
+            >
+              <div className="flex flex-col gap-base">
+                <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="email">
+                  Email Address
+                </label>
+                <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                  <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">mail</span>
                   <input
+                    className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                    id="email"
                     type="email"
+                    placeholder="engineer@audiowave.ai"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@domain.com"
-                    required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>
+              </div>
 
-                <div className="space-y-1.5 animate-stagger-item" style={{ animationDelay: "2.0s" }}>
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Password</label>
+              <div className="flex flex-col gap-base">
+                <div className="flex justify-between items-center">
+                  <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="password">
+                    Password
+                  </label>
+                  <a
+                    className="font-technical-xs text-technical-xs text-primary hover:text-primary-fixed-dim transition-colors hover:drop-shadow-[0_0_5px_rgba(0,212,255,0.5)]"
+                    href="#"
+                  >
+                    Forgot?
+                  </a>
+                </div>
+                <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                  <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">lock</span>
                   <input
-                    type="password"
+                    className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
+                  <button
+                    className="text-on-surface-variant hover:text-on-surface hover:scale-110 transition-all ml-2 flex items-center"
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {showPassword ? "visibility_off" : "visibility"}
+                    </span>
+                  </button>
                 </div>
+              </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full font-body py-3 px-4 mt-2 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  ) : (
-                    "Sign In with Email"
-                  )}
-                </button>
-              </motion.form>
-            )}
-
-            {activeTab === "signup" && (
-              <motion.form
-                key="signup-form"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                onSubmit={handleEmailSignUp}
-                className="space-y-4"
+              <button
+                className="btn-gradient w-full py-3 rounded-full text-surface-container-lowest font-headline-lg-mobile text-headline-lg-mobile mt-2 flex justify-center items-center gap-2 disabled:opacity-50"
+                type="submit"
+                disabled={loading}
               >
-                <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Email Address</label>
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <span>Access Workspace</span>
+                    <span className="material-symbols-outlined text-[20px] transition-transform group-hover:translate-x-1">
+                      arrow_forward
+                    </span>
+                  </>
+                )}
+              </button>
+            </motion.form>
+          )}
+
+          {activeTab === "signup" && (
+            <motion.form
+              key="signup"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              onSubmit={handleEmailSignUp}
+              className="flex flex-col gap-md"
+            >
+              <div className="flex flex-col gap-base">
+                <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="signup-email">
+                  Email Address
+                </label>
+                <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                  <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">mail</span>
                   <input
+                    className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                    id="signup-email"
                     type="email"
+                    placeholder="engineer@audiowave.ai"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@domain.com"
-                    required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Create Password</label>
+              <div className="flex flex-col gap-base">
+                <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="signup-password">
+                  Password
+                </label>
+                <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                  <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">lock</span>
                   <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                    id="signup-password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="Minimum 6 characters"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                   />
+                  <button
+                    className="text-on-surface-variant hover:text-on-surface hover:scale-110 transition-all ml-2 flex items-center"
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {showPassword ? "visibility_off" : "visibility"}
+                    </span>
+                  </button>
                 </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Confirm Password</label>
+              <div className="flex flex-col gap-base">
+                <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="confirm-password">
+                  Confirm Password
+                </label>
+                <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                  <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">lock</span>
                   <input
-                    type="password"
+                    className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                    id="confirm-password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Repeat password"
+                    required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Repeat your password"
-                    required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
                   />
                 </div>
+              </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full font-body py-3 px-4 mt-2 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  ) : (
-                    "Register & Sign Up"
-                  )}
-                </button>
-              </motion.form>
-            )}
-
-            {activeTab === "phone" && (
-              <motion.div
-                key="phone-form"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className="space-y-4"
+              <button
+                className="btn-gradient w-full py-3 rounded-full text-surface-container-lowest font-headline-lg-mobile text-headline-lg-mobile mt-2 flex justify-center items-center gap-2 disabled:opacity-50"
+                type="submit"
+                disabled={loading}
               >
-                {phoneStep === "input" ? (
-                  <form onSubmit={handleSendCode} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Phone Number</label>
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <span>Create Account</span>
+                    <span className="material-symbols-outlined text-[20px]">
+                      person_add
+                    </span>
+                  </>
+                )}
+              </button>
+            </motion.form>
+          )}
+
+          {activeTab === "phone" && (
+            <motion.div
+              key="phone"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              className="flex flex-col gap-md"
+            >
+              {phoneStep === "input" ? (
+                <form onSubmit={handleSendCode} className="flex flex-col gap-md">
+                  <div className="flex flex-col gap-base">
+                    <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="phone">
+                      Phone Number
+                    </label>
+                    <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                      <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">phone</span>
                       <input
+                        className="bg-transparent border-none outline-none w-full font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                        id="phone"
                         type="tel"
-                        value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value)}
                         placeholder="e.g. +919876543210"
                         required
-                        className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
                       />
-                      <span className="font-body text-[10px] text-[var(--text-muted)]">
-                        Include country code prefix (e.g. +91 for India).
-                      </span>
                     </div>
+                    <span className="font-technical-xs text-[10px] text-on-surface-variant/70">
+                      Include country code (e.g., +91 for India).
+                    </span>
+                  </div>
 
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full font-body py-3 px-4 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
-                    >
-                      {loading ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        "Send Verification Code"
-                      )}
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyCode} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-center">
-                        <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Verification Code</label>
-                        <button
-                          type="button"
-                          onClick={() => setPhoneStep("input")}
-                          className="font-body text-xs text-[var(--accent-cyan)] hover:underline"
-                        >
-                          Change Number
-                        </button>
-                      </div>
+                  <button
+                    className="btn-gradient w-full py-3 rounded-full text-surface-container-lowest font-headline-lg-mobile text-headline-lg-mobile mt-2 flex justify-center items-center gap-2 disabled:opacity-50"
+                    type="submit"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>Send Code</span>
+                        <span className="material-symbols-outlined text-[20px]">send</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyCode} className="flex flex-col gap-md">
+                  <div className="flex flex-col gap-base">
+                    <div className="flex justify-between items-center">
+                      <label className="font-technical-xs text-technical-xs text-on-surface-variant" htmlFor="code">
+                        Verification Code
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setPhoneStep("input")}
+                        className="font-technical-xs text-primary hover:underline"
+                      >
+                        Change Phone
+                      </button>
+                    </div>
+                    <div className="relative flex items-center bg-[#0f0f0f]/80 border border-outline-variant rounded-lg p-2 input-glow transition-all duration-300 hover:border-outline">
+                      <span className="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">sms</span>
                       <input
+                        className="bg-transparent border-none outline-none w-full font-mono text-center text-lg tracking-widest text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 p-0"
+                        id="code"
                         type="text"
-                        value={verificationCode}
-                        onChange={(e) => setVerificationCode(e.target.value)}
-                        placeholder="Enter 6-digit SMS code"
+                        placeholder="000000"
                         maxLength={6}
                         required
-                        className="w-full font-mono text-center text-lg tracking-widest py-2 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
                       />
                     </div>
+                  </div>
 
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full font-body py-3 px-4 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
-                    >
-                      {loading ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        "Verify & Sign In"
-                      )}
-                    </button>
-                  </form>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <button
+                    className="btn-gradient w-full py-3 rounded-full text-surface-container-lowest font-headline-lg-mobile text-headline-lg-mobile mt-2 flex justify-center items-center gap-2 disabled:opacity-50"
+                    type="submit"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-surface-container-lowest border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>Verify & Sign In</span>
+                        <span className="material-symbols-outlined text-[20px]">verified</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-          {/* Social Sign-In Separator */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 0.2 }}
-            transition={{ delay: 2.1, duration: 0.5 }}
-            className="relative my-6 flex items-center justify-center"
+        {/* Divider */}
+        <div className="flex items-center gap-4">
+          <div className="flex-1 h-[1px] bg-outline-variant/50"></div>
+          <span className="font-technical-xs text-technical-xs text-on-surface-variant">OR CONTINUE WITH</span>
+          <div className="flex-1 h-[1px] bg-outline-variant/50"></div>
+        </div>
+
+        {/* Social Auth */}
+        <div className="grid grid-cols-2 gap-md">
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="bg-[#0f0f0f]/80 border border-outline-variant hover:border-primary/50 hover-glow transition-all rounded-lg py-2 flex items-center justify-center gap-2 group disabled:opacity-50"
           >
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-[var(--text-muted)]"></div>
-            </div>
-            <span className="relative font-body text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-surface)] px-3 py-1 rounded-full border border-[var(--glass-border)] backdrop-blur-md">
-              or continue with
-            </span>
-          </motion.div>
-
-          {/* Social Buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            <motion.button
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 2.2, duration: 0.4 }}
-              onClick={handleGoogleLogin}
-              disabled={loading}
-              className="flex items-center justify-center gap-2 font-body text-xs py-2.5 px-3 border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] rounded-lg font-medium text-[var(--text-primary)] transition hover:border-[rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+            <svg
+              className="w-5 h-5 text-on-surface group-hover:scale-110 transition-transform"
+              fill="currentColor"
+              viewBox="0 0 24 24"
             >
-              {/* Google SVG Icon */}
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.184 4.114-3.478 0-6.3-2.823-6.3-6.3 0-3.478 2.822-6.3 6.3-6.3 1.63 0 3.107.62 4.228 1.626l3.207-3.208C18.82 2.128 15.683 1 12.24 1 5.922 1 1 5.922 1 12.24s4.922 11.24 11.24 11.24c6.305 0 10.98-4.426 10.98-11.24 0-.693-.06-1.37-.18-1.955H12.24z" />
-              </svg>
-              Google
-            </motion.button>
-            <motion.button
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 2.3, duration: 0.4 }}
-              onClick={handleAppleLogin}
-              disabled={loading}
-              className="flex items-center justify-center gap-2 font-body text-xs py-2.5 px-3 border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] rounded-lg font-medium text-[var(--text-primary)] transition hover:border-[rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+              <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"></path>
+            </svg>
+            <span className="font-technical-sm text-technical-sm">Google</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleAppleLogin}
+            disabled={loading}
+            className="bg-[#0f0f0f]/80 border border-outline-variant hover:border-primary/50 hover-glow transition-all rounded-lg py-2 flex items-center justify-center gap-2 group disabled:opacity-50"
+          >
+            <svg
+              className="w-5 h-5 text-on-surface group-hover:scale-110 transition-transform"
+              fill="currentColor"
+              viewBox="0 0 24 24"
             >
-              {/* Apple SVG Icon */}
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.22.67-2.94 1.52-.62.71-1.16 1.85-1.01 2.96 1.12.09 2.27-.58 2.96-1.42z" />
-              </svg>
-              Apple
-            </motion.button>
-          </div>
-        </motion.div>
-      </motion.div>
+              <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.19 2.31-.88 3.5-.8 1.45.09 2.58.62 3.32 1.63-2.88 1.77-2.39 5.6.53 6.81-.72 1.84-1.74 3.55-2.43 4.53zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"></path>
+            </svg>
+            <span className="font-technical-sm text-technical-sm">Apple</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

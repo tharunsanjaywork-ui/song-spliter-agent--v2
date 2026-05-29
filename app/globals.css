@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
+
 :root {
   /* Colors from BEHAVIOUR.md & UI_UX.md */
   --bg-deep: #080C14;
@@ -27,7 +29,8 @@
 
 body {
   color: var(--text-primary);
-  background: var(--bg-deep);
+  background: #0f0f0f;
+  overflow-x: hidden;
 }
 
 @layer utilities {
@@ -41,3 +44,138 @@ body {
     font-family: var(--font-mono), monospace;
   }
 }
+
+/* Custom Redesign CSS Rules */
+
+/* Mesh Gradient Background */
+.mesh-bg {
+    position: absolute;
+    inset: 0;
+    background: 
+        radial-gradient(circle at 15% 50%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 85% 30%, rgba(184, 175, 255, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 50% 80%, rgba(0, 212, 255, 0.05) 0%, transparent 50%);
+    animation: shift-mesh 20s infinite alternate ease-in-out;
+    z-index: 0;
+}
+
+@keyframes shift-mesh {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 100% 100%; }
+}
+
+.glass-panel {
+    background: rgba(36, 36, 36, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Slide Up Animation */
+.slide-up {
+    animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateY(40px);
+}
+
+@keyframes slideUp {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.text-gradient {
+    background: linear-gradient(to right, #00d4ff, #b8afff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.btn-gradient {
+    background: linear-gradient(to right, #00d4ff, #b8afff);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-gradient:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+}
+
+.input-glow:focus-within {
+    border-color: #00d4ff;
+    box-shadow: 0 0 0 1px #00d4ff, 0 0 10px rgba(0, 212, 255, 0.2);
+}
+
+/* Interactive Elements Glow */
+.hover-glow {
+    transition: all 0.3s ease;
+}
+.hover-glow:hover {
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+/* Particle System */
+.particle {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0.4;
+    filter: blur(3px);
+    animation: float-organic infinite linear;
+}
+
+@keyframes float-organic {
+    0% { transform: translate(0, 0) scale(1); opacity: 0; }
+    20% { opacity: 0.6; }
+    50% { transform: translate(var(--tx), var(--ty)) scale(1.2); opacity: 0.8; }
+    80% { opacity: 0.6; }
+    100% { transform: translate(calc(var(--tx) * 2), calc(var(--ty) * 2)) scale(1); opacity: 0; }
+}
+
+/* Typewriter */
+.typewriter {
+    display: inline-block;
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 2px solid #00d4ff;
+    animation: typing 3.5s steps(40, end), blink-caret 0.75s step-end infinite;
+    width: 0;
+    animation-fill-mode: forwards;
+    animation-delay: 0.5s;
+}
+
+@keyframes typing {
+    from { width: 0 }
+    to { width: 100% }
+}
+
+@keyframes blink-caret {
+    from, to { border-color: transparent }
+    50% { border-color: #00d4ff; }
+}
+
+/* Shake Error */
+@keyframes shake {
+    0%, 100% { transform: translateY(0) translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+    20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+.shake {
+    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both !important;
+}
+
+.glass-edge {
+    box-shadow: inset 1px 1px 0px 0px rgba(255, 255, 255, 0.05);
+}
+
+/* Custom Scrollbar for sleek look */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #353534; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3c494e; }
+
