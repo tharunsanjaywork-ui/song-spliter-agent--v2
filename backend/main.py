@@ -150,11 +150,22 @@ def configure_cloudinary(backup: bool = False):
     )
 
 
+_last_cloudinary_check_time = 0.0
+_use_backup_cloudinary = False
+
 def get_active_cloudinary():
+    global _last_cloudinary_check_time, _use_backup_cloudinary
+    current_time = time.time()
+    if current_time - _last_cloudinary_check_time < 3600.0:
+        configure_cloudinary(backup=_use_backup_cloudinary)
+        return
+
     try:
         db = get_active_db()
         meta = db.collection("_meta").document("quota").get()
         if meta.exists and meta.to_dict().get("useBackupCloudinary", False):
+            _use_backup_cloudinary = True
+            _last_cloudinary_check_time = current_time
             configure_cloudinary(backup=True)
             return
         usage = cloudinary.api.usage()
@@ -164,10 +175,14 @@ def get_active_cloudinary():
                 {"useBackupCloudinary": True}, merge=True
             )
             increment_write_count(1)
+            _use_backup_cloudinary = True
+            _last_cloudinary_check_time = current_time
             configure_cloudinary(backup=True)
             return
     except Exception:
         logger.warning("Cloudinary quota check failed, using primary config.")
+    _use_backup_cloudinary = False
+    _last_cloudinary_check_time = current_time
     configure_cloudinary(backup=False)
 
 

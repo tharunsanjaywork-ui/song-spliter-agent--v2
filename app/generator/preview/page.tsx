@@ -59,6 +59,7 @@ function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }
         height: 48,
         normalize: true,
         interact: true,
+        backend: "MediaElement",
       });
 
       ws.on("ready", () => {
