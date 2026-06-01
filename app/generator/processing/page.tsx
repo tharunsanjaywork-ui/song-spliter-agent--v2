@@ -311,6 +311,49 @@ export default function GeneratorProcessingPage() {
             localStorage.removeItem("active_route");
             localStorage.removeItem("active_generator_route");
             clearInterval(pollInterval);
+          } else if (status === "processing") {
+            const activeStep = res.data.activeStep;
+            const thinkingElapsed = res.data.thinkingElapsed;
+            if (activeStep) {
+              const stepsOrder: string[] = ["analyzing", "thinking", "saving", "naming"];
+              const currentIndex = stepsOrder.indexOf(activeStep);
+              if (currentIndex !== -1) {
+                const stepMessages: Record<string, ChatMessage> = {
+                  analyzing: {
+                    id: "analyzing",
+                    emoji: "🤖",
+                    text: "AI is currently checking your processed file to analyze and generate a report",
+                  },
+                  thinking: {
+                    id: "thinking",
+                    emoji: "🧠",
+                    text: "Thinking...",
+                  },
+                  saving: {
+                    id: "saving",
+                    emoji: "💾",
+                    text: "Saving individual files...",
+                  },
+                  naming: {
+                    id: "naming",
+                    emoji: "🏷️",
+                    text: "Naming your songs...",
+                  },
+                };
+                const backfilledMessages: ChatMessage[] = [];
+                for (let i = 0; i <= currentIndex; i++) {
+                  const stepId = stepsOrder[i];
+                  backfilledMessages.push(stepMessages[stepId]);
+                }
+                setMessages((prev) => {
+                  if (prev.length >= backfilledMessages.length) return prev;
+                  return backfilledMessages;
+                });
+                if (activeStep === "thinking" && typeof thinkingElapsed === "number") {
+                  setThinkingSeconds(thinkingElapsed);
+                }
+              }
+            }
           }
         }
       } catch {
@@ -322,7 +365,7 @@ export default function GeneratorProcessingPage() {
       isSubscribed = false;
       clearInterval(pollInterval);
     };
-  }, [reconnectJobId, router, setContextJobId]);
+  }, [reconnectJobId, router, setContextJobId, setMessages, setThinkingSeconds]);
 
   // Trigger queued thinking event when 4 seconds expire
   useEffect(() => {

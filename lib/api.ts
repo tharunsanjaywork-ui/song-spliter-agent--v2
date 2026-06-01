@@ -28,6 +28,9 @@ export interface JobData {
   files: JobFile[];
   errorType?: string;
   errorMessage?: string;
+  activeStep?: string;
+  thinkingElapsed?: number;
+  currentMessage?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────

@@ -50,6 +50,9 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+active_queues = {}
+background_tasks = set()
+
 # Rate limiter setup
 limiter = Limiter(key_func=get_remote_address)
 
@@ -305,7 +308,10 @@ async def get_job_endpoint(job_id: str, uid: str = Depends(get_current_uid)):
                 "fileCount": job_data.get("fileCount", 0),
                 "files": job_data.get("files", []),
                 "errorType": job_data.get("errorType"),
-                "errorMessage": job_data.get("errorMessage")
+                "errorMessage": job_data.get("errorMessage"),
+                "activeStep": job_data.get("activeStep"),
+                "thinkingElapsed": job_data.get("thinkingElapsed"),
+                "currentMessage": job_data.get("currentMessage")
             }
         }
     except HTTPException:
@@ -504,6 +510,136 @@ async def upload_to_cloudinary_async(
     return await asyncio.gather(*tasks)
 
 
+async def run_pipeline_background(
+    audio_path: str,
+    uid: str,
+    openrouter_key: str,
+    keys: dict,
+    work_dir: str,
+    job_id: str,
+    analysis_json: dict,
+    original_filename: str,
+):
+    """Run split pipeline in background, persistent to Firestore, cleanup on complete/error."""
+    try:
+        async for event in run_pipeline(
+            audio_path=audio_path,
+            uid=uid,
+            openrouter_key=openrouter_key,
+            keys=keys,
+            work_dir=work_dir,
+            job_id=job_id,
+            analysis=analysis_json,
+        ):
+            step = event.get("step", "")
+
+            if step == "complete":
+                pipeline_files = event.get("files", [])
+                try:
+                    uploaded = await upload_to_cloudinary_async(
+                        pipeline_files, uid, job_id
+                    )
+                except Exception as upload_exc:
+                    logger.exception("Cloudinary upload batch failed")
+                    uploaded = pipeline_files
+
+                # Update Firestore job to complete
+                try:
+                    db = get_active_db()
+                    db.collection("jobs").document(job_id).set({
+                        "jobId": job_id,
+                        "uid": uid,
+                        "status": "complete",
+                        "originalFileName": original_filename,
+                        "fileCount": len(uploaded),
+                        "files": uploaded,
+                        "errorType": None,
+                        "createdAt": firestore.firestore.SERVER_TIMESTAMP,
+                        "completedAt": firestore.firestore.SERVER_TIMESTAMP,
+                        "activeStep": None,
+                        "currentMessage": None,
+                        "thinkingElapsed": None,
+                    }, merge=True)
+                    increment_write_count(1)
+                except Exception:
+                    logger.exception("Failed to update job to complete")
+
+                # Push complete event to active queues
+                if job_id in active_queues:
+                    for q in list(active_queues[job_id]):
+                        await q.put({"step": "complete", "jobId": job_id})
+
+            elif step == "error":
+                error_type = event.get("error_type", "general")
+                error_message = event.get("message")
+                try:
+                    db = get_active_db()
+                    db.collection("jobs").document(job_id).update({
+                        "status": "failed",
+                        "errorType": error_type,
+                        "errorMessage": error_message,
+                        "activeStep": None,
+                        "currentMessage": None,
+                        "thinkingElapsed": None,
+                    })
+                    increment_write_count(1)
+                except Exception:
+                    logger.exception("Failed to update job to failed")
+
+                # Push error event to active queues
+                if job_id in active_queues:
+                    for q in list(active_queues[job_id]):
+                        await q.put(event)
+
+            else:
+                # Update Firestore intermediate progress
+                try:
+                    db = get_active_db()
+                    update_data = {
+                        "activeStep": step,
+                        "currentMessage": event.get("message") or "",
+                    }
+                    if step == "thinking":
+                        update_data["thinkingElapsed"] = event.get("elapsed", 0)
+
+                    db.collection("jobs").document(job_id).update(update_data)
+                    increment_write_count(1)
+                except Exception as e:
+                    logger.warning(f"Failed to update intermediate Firestore status: {e}")
+
+                # Push intermediate event to active queues
+                if job_id in active_queues:
+                    for q in list(active_queues[job_id]):
+                        await q.put(event)
+
+    except Exception as exc:
+        logger.exception("Unhandled error in background task")
+        try:
+            db = get_active_db()
+            db.collection("jobs").document(job_id).update({
+                "status": "failed",
+                "errorType": "general",
+                "errorMessage": str(exc),
+                "activeStep": None,
+                "currentMessage": None,
+                "thinkingElapsed": None,
+            })
+            increment_write_count(1)
+        except Exception:
+            pass
+        if job_id in active_queues:
+            for q in list(active_queues[job_id]):
+                await q.put({"step": "error", "error_type": "general", "message": str(exc)})
+    finally:
+        # Clean up temp directory
+        try:
+            if os.path.exists(work_dir):
+                shutil.rmtree(work_dir)
+                logger.info("Cleaned up work dir: %s", work_dir)
+        except Exception:
+            logger.warning("Failed to clean up work dir: %s", work_dir)
+
+
 # ── POST /api/process — Main processing endpoint ──────────────────────────────
 
 @app.post("/api/process")
@@ -553,83 +689,42 @@ async def process_audio(
         increment_write_count(1)
     except Exception as exc:
         logger.exception("Failed to create job document")
-        # Continue anyway — the pipeline will still work
+
+    # Register active queue for streaming
+    q = asyncio.Queue()
+    if job_id not in active_queues:
+        active_queues[job_id] = []
+    active_queues[job_id].append(q)
+
+    # Launch pipeline as background task
+    task = asyncio.create_task(
+        run_pipeline_background(
+            audio_path=audio_path,
+            uid=uid,
+            openrouter_key=user_keys["openrouter_key"],
+            keys=user_keys,
+            work_dir=work_dir,
+            job_id=job_id,
+            analysis_json=analysis_json,
+            original_filename=file.filename or "unknown.mp3",
+        )
+    )
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
     async def event_stream():
         try:
             yield f"data: {json.dumps({'step': 'init', 'jobId': job_id})}\n\n"
-            final_files = None
-            async for event in run_pipeline(
-                audio_path=audio_path,
-                uid=uid,
-                openrouter_key=user_keys["openrouter_key"],
-                keys=user_keys,
-                work_dir=work_dir,
-                job_id=job_id,
-                analysis=analysis_json,
-            ):
-                step = event.get("step", "")
-
-                if step == "complete":
-                    # Upload split files to Cloudinary
-                    pipeline_files = event.get("files", [])
-                    try:
-                        uploaded = await upload_to_cloudinary_async(
-                            pipeline_files, uid, event.get("jobId", job_id)
-                        )
-                        final_files = uploaded
-                    except Exception as upload_exc:
-                        logger.exception("Cloudinary upload batch failed")
-                        uploaded = pipeline_files
-
-                    # Update Firestore job to complete
-                    actual_job_id = event.get("jobId", job_id)
-                    try:
-                        db = get_active_db()
-                        db.collection("jobs").document(actual_job_id).set({
-                            "jobId": actual_job_id,
-                            "uid": uid,
-                            "status": "complete",
-                            "originalFileName": file.filename or "unknown.mp3",
-                            "fileCount": len(uploaded),
-                            "files": uploaded,
-                            "errorType": None,
-                            "createdAt": firestore.firestore.SERVER_TIMESTAMP,
-                            "completedAt": firestore.firestore.SERVER_TIMESTAMP,
-                        }, merge=True)
-                        increment_write_count(1)
-                    except Exception:
-                        logger.exception("Failed to update job to complete")
-
-                    yield f"data: {json.dumps({'step': 'complete', 'jobId': actual_job_id})}\n\n"
-
-                elif step == "error":
-                    error_type = event.get("error_type", "general")
-                    error_message = event.get("message")
-                    try:
-                        db = get_active_db()
-                        db.collection("jobs").document(job_id).update({
-                            "status": "failed",
-                            "errorType": error_type,
-                            "errorMessage": error_message,
-                        })
-                        increment_write_count(1)
-                    except Exception:
-                        logger.exception("Failed to update job to failed")
-
-                    yield f"data: {json.dumps(event)}\n\n"
-
-                else:
-                    yield f"data: {json.dumps(event)}\n\n"
-
+            while True:
+                event = await q.get()
+                yield f"data: {json.dumps(event)}\n\n"
+                if event.get("step") in ("complete", "error"):
+                    break
         finally:
-            # Clean up temp directory
-            try:
-                if os.path.exists(work_dir):
-                    shutil.rmtree(work_dir)
-                    logger.info("Cleaned up work dir: %s", work_dir)
-            except Exception:
-                logger.warning("Failed to clean up work dir: %s", work_dir)
+            if job_id in active_queues and q in active_queues[job_id]:
+                active_queues[job_id].remove(q)
+                if not active_queues[job_id]:
+                    del active_queues[job_id]
 
     return StreamingResponse(
         event_stream(),
