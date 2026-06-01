@@ -5,7 +5,7 @@ import React, {
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
-import { audioBufferToWav, sliceAudioBuffer, formatSec } from "@/lib/audioUtils";
+import { audioBufferToWav, audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate } from "@/lib/audioUtils";
 import {
   saveEditorSession,
   saveEditorSegments,
@@ -439,7 +439,7 @@ export function AudioEditor({
   const loadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
     setLoading(true);
-    setLoadingMsg("Decoding audio…");
+    setLoadingMsg("Calculating audio metadata…");
     setWaveReady(false);
     setSegments([]);
     setSelectedIds(new Set());
@@ -447,6 +447,17 @@ export function AudioEditor({
     setCursorTime(0);
     setErrorMsg(null);
     try {
+      // 1. Estimate total duration first to calculate memory footprint
+      let totalDurationSec = 0;
+      for (let i = 0; i < files.length; i++) {
+        const dur = await getAudioDuration(files[i]);
+        totalDurationSec += dur;
+      }
+
+      // 2. Compute optimal sample rate based on duration and device RAM
+      const targetSampleRate = calculateOptimalSampleRate(totalDurationSec);
+      const isDownsampled = targetSampleRate < 44100;
+
       if (audioCtxRef.current) {
         try {
           await audioCtxRef.current.close();
@@ -456,8 +467,11 @@ export function AudioEditor({
         audioCtxRef.current = null;
       }
       
+      // 3. Create AudioContext with dynamic sample rate optimization
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: targetSampleRate
+      });
       audioCtxRef.current = ctx;
       
       const decodedBuffers: AudioBuffer[] = [];
@@ -465,7 +479,10 @@ export function AudioEditor({
       let currentStart = 0;
       
       for (let i = 0; i < files.length; i++) {
-        setLoadingMsg(`Decoding file ${i + 1} of ${files.length}…`);
+        const label = isDownsampled 
+          ? `Decoding file ${i + 1} of ${files.length} (memory optimized: ${targetSampleRate / 1000}kHz)…`
+          : `Decoding file ${i + 1} of ${files.length}…`;
+        setLoadingMsg(label);
         const file = files[i];
         const ab = await file.arrayBuffer();
         const decoded = await ctx.decodeAudioData(ab);
@@ -646,15 +663,10 @@ export function AudioEditor({
   const validateAndLoadFiles = useCallback(async (files: File[]) => {
     const ALLOWED_EXTS = [".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"];
     const validFiles: File[] = [];
-    
     for (const file of files) {
       const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
       if (!ALLOWED_EXTS.includes(ext)) {
         setErrorMsg(`Unsupported file type: ${file.name}`);
-        return;
-      }
-      if (file.size > 500 * 1024 * 1024) {
-        setErrorMsg(`File too large (max 500 MB): ${file.name}`);
         return;
       }
       validFiles.push(file);
@@ -911,10 +923,22 @@ export function AudioEditor({
 
   const downloadSegment = useCallback(async (seg: Segment) => {
     if (!audioBuffer || !audioCtxRef.current) return;
-    const FileSaver = await import("file-saver");
-    const saveAs = FileSaver.default || FileSaver.saveAs || FileSaver;
-    const slice = sliceAudioBuffer(audioCtxRef.current, audioBuffer, seg.startSec, seg.endSec);
-    saveAs(new Blob([audioBufferToWav(slice)], { type: "audio/wav" }), `${seg.name}.wav`);
+    setLoading(true);
+    setLoadingMsg(`Encoding segment "${seg.name}" to MP3…`);
+    try {
+      const FileSaver = await import("file-saver");
+      const saveAs = FileSaver.default || FileSaver.saveAs || FileSaver;
+      const slice = sliceAudioBuffer(audioCtxRef.current, audioBuffer, seg.startSec, seg.endSec);
+      const mp3Blob = await audioBufferToMp3(slice, (percent) => {
+        setLoadingMsg(`Encoding "${seg.name}" to MP3: ${percent}%`);
+      });
+      saveAs(mp3Blob, `${seg.name}.mp3`);
+    } catch (err) {
+      console.error("Encoding error:", err);
+      setErrorMsg("Failed to encode segment to MP3.");
+    } finally {
+      setLoading(false);
+    }
   }, [audioBuffer]);
 
   const downloadSelected = useCallback(async () => {
@@ -925,15 +949,32 @@ export function AudioEditor({
 
   const downloadAll = useCallback(async () => {
     if (!audioBuffer || !audioCtxRef.current || !segments.length) return;
-    const { default: JSZip } = await import("jszip");
-    const FileSaver = await import("file-saver");
-    const saveAs = FileSaver.default || FileSaver.saveAs || FileSaver;
-    const zip = new JSZip();
-    for (const seg of segments) {
-      const slice = sliceAudioBuffer(audioCtxRef.current, audioBuffer, seg.startSec, seg.endSec);
-      zip.file(`${seg.name}.wav`, audioBufferToWav(slice));
+    setLoading(true);
+    try {
+      const { default: JSZip } = await import("jszip");
+      const FileSaver = await import("file-saver");
+      const saveAs = FileSaver.default || FileSaver.saveAs || FileSaver;
+      const zip = new JSZip();
+      
+      for (let idx = 0; idx < segments.length; idx++) {
+        const seg = segments[idx];
+        setLoadingMsg(`Encoding segment ${idx + 1} of ${segments.length} ("${seg.name}")…`);
+        const slice = sliceAudioBuffer(audioCtxRef.current, audioBuffer, seg.startSec, seg.endSec);
+        const mp3Blob = await audioBufferToMp3(slice, (percent) => {
+          setLoadingMsg(`Encoding segment ${idx + 1} of ${segments.length} ("${seg.name}"): ${percent}%`);
+        });
+        zip.file(`${seg.name}.mp3`, mp3Blob);
+      }
+      
+      setLoadingMsg("Creating ZIP package…");
+      const content = await zip.generateAsync({ type: "blob" });
+      saveAs(content, "audiowave_editor.zip");
+    } catch (err) {
+      console.error("Failed to build ZIP:", err);
+      setErrorMsg("Failed to create ZIP package.");
+    } finally {
+      setLoading(false);
     }
-    saveAs(await zip.generateAsync({ type: "blob" }), "audiowave_editor.zip");
   }, [audioBuffer, segments]);
 
   // ── Rename ────────────────────────────────────────────────────────────────────
@@ -1001,22 +1042,60 @@ export function AudioEditor({
 
   const handleAddFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || !audioBuffer || !audioCtxRef.current) return;
+    if (!files || files.length === 0 || !audioBuffer || !audioCtxRef.current || !audioFile) return;
 
     // Reset input immediately so the same file can be selected again
     const input = e.target;
     
     setLoading(true);
-    setLoadingMsg("Decoding new file(s)…");
+    setLoadingMsg("Calculating metadata for added files…");
     try {
-      const ctx = audioCtxRef.current;
+      // 1. Calculate the new combined duration
+      let addedDuration = 0;
+      for (let i = 0; i < files.length; i++) {
+        addedDuration += await getAudioDuration(files[i]);
+      }
+      const newCombinedDuration = duration + addedDuration;
+
+      // 2. Compute the new optimal sample rate
+      const newOptimalRate = calculateOptimalSampleRate(newCombinedDuration);
+      
+      let ctx = audioCtxRef.current;
+      let currentBuffers: AudioBuffer[] = [];
+
+      // 3. Check if we need to downsample the existing audio buffer to save memory
+      if (newOptimalRate < ctx.sampleRate) {
+        setLoadingMsg(`Downsampling workspace for memory efficiency (${newOptimalRate / 1000}kHz)…`);
+        
+        // Re-create a context with the lower sample rate
+        try {
+          await ctx.close();
+        } catch {}
+        
+        ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: newOptimalRate
+        });
+        audioCtxRef.current = ctx;
+
+        // Re-decode the original merged file
+        const originalArrayBuffer = await audioFile.arrayBuffer();
+        const reDecodedOriginal = await ctx.decodeAudioData(originalArrayBuffer);
+        currentBuffers.push(reDecodedOriginal);
+      } else {
+        // Safe to keep the existing decoded buffer
+        currentBuffers.push(audioBuffer);
+      }
+
       const newBuffers: AudioBuffer[] = [];
       const newSegs: Segment[] = [];
       let runningEnd = duration;
 
-      // Decode all added files
+      // 4. Decode all added files
       for (let i = 0; i < files.length; i++) {
-        setLoadingMsg(`Decoding added file ${i + 1} of ${files.length}…`);
+        const label = newOptimalRate < 44100
+          ? `Decoding added file ${i + 1} of ${files.length} (memory optimized: ${newOptimalRate / 1000}kHz)…`
+          : `Decoding added file ${i + 1} of ${files.length}…`;
+        setLoadingMsg(label);
         const file = files[i];
         const ab = await file.arrayBuffer();
         const decoded = await ctx.decodeAudioData(ab);
@@ -1030,9 +1109,9 @@ export function AudioEditor({
         runningEnd += decoded.duration;
       }
 
-      // Merge existing buffer + all new buffers
+      // Merge existing buffer(s) + all new buffers
       setLoadingMsg("Merging audio tracks…");
-      const allBuffers = [audioBuffer, ...newBuffers];
+      const allBuffers = [...currentBuffers, ...newBuffers];
       const merged = concatenateAudioBuffers(ctx, allBuffers);
 
       // Build WAV blob for WaveSurfer to play the full combined track

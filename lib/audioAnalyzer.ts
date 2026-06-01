@@ -102,9 +102,8 @@ export async function analyzeAudioFile(
 ): Promise<AnalysisResult> {
   onProgress("Decoding audio locally...");
   
-  // Use Web Audio API for fast local C++ decoding
   const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  const audioCtx = new AudioContextClass();
+  const audioCtx = new AudioContextClass({ sampleRate: 16000 });
   
   const arrayBuffer = await file.arrayBuffer();
   const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);

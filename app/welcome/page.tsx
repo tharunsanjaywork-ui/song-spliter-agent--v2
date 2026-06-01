@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import Navbar from "@/components/Navbar";
 import { doc, getDoc } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
-import { getJob } from "@/lib/api";
 
 const features = [
   {
@@ -73,58 +72,8 @@ export default function WelcomePage() {
   const [checkingSetup, setCheckingSetup] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFeature, setActiveFeature] = useState("waveform");
-  
-  // Recovery states
-  const [recoveryToast, setRecoveryToast] = useState<string | null>(null);
 
-  // Background recovery & route persistence restore on mount
-  useEffect(() => {
-    if (authLoading || !user) return;
 
-    const restoreState = async () => {
-      // 1. Check for background AI splitting jobs
-      const activeJobId = localStorage.getItem("active_split_job");
-      if (activeJobId) {
-        setRecoveryToast("Checking active background split job...");
-        try {
-          const res = await getJob(activeJobId);
-          if (res.success && res.data) {
-            const status = res.data.status;
-            if (status === "complete") {
-              setRecoveryToast("AI Split Job complete! Opening preview...");
-              setTimeout(() => {
-                router.push(`/generator/preview?jobId=${activeJobId}`);
-              }, 1500);
-              return;
-            } else if (status === "processing") {
-              setRecoveryToast("AI Split Job still processing. Opening progress screen...");
-              setTimeout(() => {
-                router.push(`/generator/processing?jobId=${activeJobId}`);
-              }, 1500);
-              return;
-            }
-          }
-          // If not processing/complete, clear it
-          localStorage.removeItem("active_split_job");
-          setRecoveryToast(null);
-        } catch {
-          localStorage.removeItem("active_split_job");
-          setRecoveryToast(null);
-        }
-      }
-
-      // 2. If no active split job, check for persistent route restore
-      const activeRoute = localStorage.getItem("active_route");
-      if (activeRoute && activeRoute !== "/welcome") {
-        setRecoveryToast(`Restoring your active session: ${activeRoute}...`);
-        setTimeout(() => {
-          router.push(activeRoute);
-        }, 1200);
-      }
-    };
-
-    restoreState();
-  }, [user, authLoading, router]);
 
   // Staggered hero text words
   const titleWords = "Welcome to AudioWave".split(" ");
@@ -678,25 +627,7 @@ export default function WelcomePage() {
         )}
       </AnimatePresence>
 
-      {/* Recovery Redirect Toast */}
-      <AnimatePresence>
-        {recoveryToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            className="fixed bottom-6 right-6 z-50 p-4 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl shadow-2xl flex items-center gap-3 max-w-sm backdrop-blur-xl"
-          >
-            <div className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.08)] flex items-center justify-center text-[var(--accent-cyan)] shrink-0">
-              <div className="w-4 h-4 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-heading text-xs font-bold text-[var(--text-primary)]">Restoring Session</p>
-              <p className="font-body text-[10px] text-[var(--text-secondary)] mt-0.5 truncate">{recoveryToast}</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
     </div>
   );
 }

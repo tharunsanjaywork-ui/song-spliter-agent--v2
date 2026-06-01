@@ -171,6 +171,7 @@ export default function GeneratorProcessingPage() {
   
   // Reload recovery state
   const [reconnectJobId, setReconnectJobId] = useState<string | null>(null);
+  const [showUploadSuccessBanner, setShowUploadSuccessBanner] = useState(false);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
@@ -189,6 +190,10 @@ export default function GeneratorProcessingPage() {
             localStorage.setItem("active_split_job", event.jobId);
             localStorage.setItem("active_route", "/generator/processing");
             localStorage.setItem("active_generator_route", "/generator/processing");
+            setShowUploadSuccessBanner(true);
+            setTimeout(() => {
+              setShowUploadSuccessBanner(false);
+            }, 10000);
           }
           break;
         case "analyzing":
@@ -350,6 +355,17 @@ export default function GeneratorProcessingPage() {
         setAnalysisStatus(null);
         setIsWaking(false);
         setIsUploading(false);
+        
+        // Mobile Tab-Switch/Backgrounding Recovery:
+        // If connection dropped but we already have an active split job,
+        // recover by polling instead of showing an error modal.
+        const activeJob = localStorage.getItem("active_split_job");
+        if (activeJob) {
+          console.warn("Connection dropped. Switching to background recovery polling...", err);
+          setReconnectJobId(activeJob);
+          return;
+        }
+
         setErrorType("general");
         setCustomErrorMsg(err instanceof Error ? err.message : "Something went wrong on the server.");
         setShowErrorModal(true);
@@ -446,6 +462,37 @@ export default function GeneratorProcessingPage() {
             </span>
           </div>
         </div>
+
+        {/* Upload Success Banner */}
+        <AnimatePresence>
+          {showUploadSuccessBanner && (
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.95 }}
+              className="w-full max-w-md bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex gap-3 relative overflow-hidden z-10 shadow-lg backdrop-blur-xl mb-6"
+            >
+              <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
+              <div className="w-10 h-10 rounded-lg bg-green-500/15 border border-green-500/30 flex items-center justify-center text-green-400 flex-shrink-0">
+                <span className="material-symbols-outlined text-[20px]">cloud_done</span>
+              </div>
+              <div className="flex-grow min-w-0">
+                <h4 className="font-technical-sm text-sm font-bold text-green-400">
+                  Upload & Analysis Complete!
+                </h4>
+                <p className="font-body-md text-xs text-on-surface-variant leading-relaxed mt-0.5">
+                  Your track is now processing on the server. You can safely close this tab, lock your screen, or switch to other apps.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowUploadSuccessBanner(false)}
+                className="w-6 h-6 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition flex-shrink-0"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Step Pipeline Card */}
         <div className="w-full max-w-md bg-surface-container-low/80 backdrop-blur-xl rounded-xl border border-white/5 border-t-white/10 border-l-white/10 p-6 relative overflow-hidden z-10 shadow-2xl mb-6">

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { useAuth } from "@/hooks/useAuth";
-import { wakeupServer, getJob } from "@/lib/api";
+import { wakeupServer } from "@/lib/api";
 import { doc, getDoc } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 
@@ -17,7 +17,6 @@ const ALLOWED_MIME_TYPES = new Set([
   "audio/mpeg", "audio/wav", "audio/ogg",
   "audio/flac", "audio/aac", "audio/mp4", "audio/x-m4a",
 ]);
-const MAX_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
 
 // ─── Helper: format bytes ─────────────────────────────────────────────────────
 
@@ -145,7 +144,7 @@ function DropZone({ dragOver, onDragOver, onDragLeave, onDrop, onClick }: DropZo
           </span>
         ))}
       </div>
-      <p className="font-technical-xs text-[11px] text-on-surface-variant mt-4">Supported up to 500 MB</p>
+      <p className="font-technical-xs text-[11px] text-on-surface-variant mt-4">Supports all file sizes</p>
     </motion.div>
   );
 }
@@ -227,38 +226,14 @@ export default function GeneratorUploadPage() {
 
     const checkStatusAndWakeup = async () => {
       try {
-        if (typeof window !== "undefined") {
-          // 1. Check for active generator route persistence
-          const activeRoute = localStorage.getItem("active_generator_route");
-          if (activeRoute && activeRoute !== "/generator/upload") {
-            router.push(activeRoute);
-            return;
-          }
-
-          // 2. Fallback check for active split job status
-          const activeJob = localStorage.getItem("active_split_job");
-          if (activeJob) {
-            try {
-              const res = await getJob(activeJob);
-              if (res.success && res.data) {
-                const status = res.data.status;
-                if (status === "complete") {
-                  router.push(`/generator/preview?jobId=${activeJob}`);
-                  return;
-                } else if (status === "processing") {
-                  router.push("/generator/processing");
-                  return;
-                }
-              }
-              localStorage.removeItem("active_split_job");
-            } catch {
-              router.push("/generator/processing");
-              return;
-            }
-          }
+        // Fast path: check sessionStorage cache for setupComplete
+        const cached = sessionStorage.getItem("setupComplete");
+        if (cached === "true") {
+          setCheckingSetup(false);
+          return;
         }
 
-        // Client-side Firestore check — no backend cold start needed
+        // Slow path: query Firestore once, then cache result
         const userDocRef = doc(getFirebaseDb(), "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         const setupComplete = userDocSnap.exists() ? userDocSnap.data()?.setupComplete : false;
@@ -266,8 +241,7 @@ export default function GeneratorUploadPage() {
           router.push("/generator/setup");
           return;
         }
-        localStorage.setItem("active_route", "/generator/upload");
-        localStorage.setItem("active_generator_route", "/generator/upload");
+        sessionStorage.setItem("setupComplete", "true");
         setCheckingSetup(false);
       } catch (err) {
         console.error("Setup check error:", err);
@@ -297,10 +271,6 @@ export default function GeneratorUploadPage() {
 
   const validateAndSetFile = useCallback((file: File) => {
     setError(null);
-    if (file.size > MAX_SIZE_BYTES) {
-      setError("This file is too large. Maximum size is 500MB.");
-      return;
-    }
     const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext) && !ALLOWED_MIME_TYPES.has(file.type)) {
       setError(

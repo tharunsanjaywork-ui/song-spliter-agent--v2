@@ -17,11 +17,6 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("active_route");
-        localStorage.removeItem("active_split_job");
-        localStorage.removeItem("active_generator_route");
-      }
       await signOut(getFirebaseAuth());
       router.push("/");
     } catch (error) {
@@ -30,9 +25,7 @@ export default function Navbar() {
   };
 
   const clearActiveRoute = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("active_route");
-    }
+    // No-op since route recovery is removed
   };
 
   const navLinks = [

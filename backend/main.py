@@ -378,7 +378,7 @@ ALLOWED_MIMES = {
     "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac",
     "audio/aac", "audio/mp4", "audio/x-m4a",
 }
-MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 
 
 async def validate_upload(file: UploadFile) -> bytes:
@@ -386,7 +386,7 @@ async def validate_upload(file: UploadFile) -> bytes:
     content = await file.read()
     file_size = len(content)
     if file_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(400, "This file is too large. Maximum size is 500MB.")
+        raise HTTPException(400, "This file is too large. Maximum size is 2GB.")
     
     file_ext = os.path.splitext(file.filename.lower())[1] if file.filename else ""
     
