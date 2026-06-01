@@ -255,16 +255,19 @@ export async function resampleAudioBuffer(
 
 /**
  * Decodes an audio file array buffer into an AudioBuffer at a target sample rate.
- * Uses a robust retry fallback sequence:
- * 1. Tries to decode directly at the target sample rate (memory optimized).
- * 2. If it fails with an EncodingError (common in Chromium for low/non-native rates on large files),
- *    it decodes at the default native hardware sample rate and then resamples the buffer in JS.
- * 3. Handles neutering of ArrayBuffers during retry by slicing copies.
+ * Uses a robust, multi-stage retry fallback sequence to handle browser decoding limitations and OOM:
+ * 1. Tries to decode directly at the target sample rate (reusing existingCtx if provided).
+ * 2. Tries standard 22050 Hz (if target was lower).
+ * 3. Tries standard 32000 Hz (if target was lower).
+ * 4. Tries the native default hardware sample rate (typically 44.1kHz or 48kHz).
+ * 
+ * Automatically calls resampleAudioBuffer in JS if the decoded sample rate is higher than target.
  */
 export async function decodeAudioDataWithRetry(
   arrayBuffer: ArrayBuffer,
   targetSampleRate: number,
-  onProgress: (status: string) => void
+  onProgress: (status: string) => void,
+  existingCtx?: AudioContext
 ): Promise<AudioBuffer> {
   const AudioContextClass = typeof window !== "undefined"
     ? (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
@@ -273,61 +276,78 @@ export async function decodeAudioDataWithRetry(
   if (!AudioContextClass) {
     throw new Error("Web Audio API is not supported in this environment.");
   }
-  
-  // Keep the original buffer safe from neutering by slicing it for the first attempt
-  const firstAttemptBuffer = arrayBuffer.slice(0);
-  
-  onProgress("Initializing optimized decoder...");
-  // Try decoding at the target sample rate first
-  let primaryCtx: AudioContext | null = null;
-  try {
-    primaryCtx = new AudioContextClass({ sampleRate: targetSampleRate });
-    onProgress(`Decoding at optimized sample rate (${targetSampleRate / 1000}kHz)...`);
-    const decoded = await primaryCtx.decodeAudioData(firstAttemptBuffer);
-    // Success! Close context and return the decoded buffer
-    await primaryCtx.close();
-    return decoded;
-  } catch (err) {
-    console.warn(`Direct decoding at ${targetSampleRate}Hz failed, trying native rate fallback:`, err);
-    if (primaryCtx) {
-      try {
-        await primaryCtx.close();
-      } catch {}
-    }
+
+  const tryDecode = async (ctx: AudioContext, buffer: ArrayBuffer): Promise<AudioBuffer> => {
+    return await ctx.decodeAudioData(buffer);
+  };
+
+  // Build the list of rates to try in order
+  const ratesToTry = [targetSampleRate];
+  if (targetSampleRate < 22050) ratesToTry.push(22050);
+  if (targetSampleRate < 32000) ratesToTry.push(32000);
+  // Last fallback is native default rate (0 will represent new AudioContext Class with no options)
+  ratesToTry.push(0);
+
+  for (let idx = 0; idx < ratesToTry.length; idx++) {
+    const rate = ratesToTry[idx];
+    const isLast = idx === ratesToTry.length - 1;
+    const rateLabel = rate === 0 ? "native rate" : `${rate / 1000}kHz`;
     
-    onProgress("Optimized decoding failed. Retrying with native rate...");
+    // Slice a copy of the array buffer so the original remains intact if this attempt fails/neuters it
+    const bufferCopy = isLast ? arrayBuffer : arrayBuffer.slice(0);
     
-    // Fallback: decode using native hardware sample rate (no options), then resample manually
-    let fallbackCtx: AudioContext | null = null;
+    let tempCtx: AudioContext | null = null;
+    let useExisting = false;
+    
     try {
-      fallbackCtx = new AudioContextClass(); // native sample rate, typically 44.1kHz or 48kHz
-      const nativeSr = fallbackCtx.sampleRate;
-      onProgress(`Decoding at native sample rate (${nativeSr / 1000}kHz)...`);
+      if (rate === targetSampleRate && existingCtx) {
+        tempCtx = existingCtx;
+        useExisting = true;
+      } else {
+        tempCtx = rate === 0
+          ? new AudioContextClass()
+          : new AudioContextClass({ sampleRate: rate });
+      }
       
-      // Use the original arrayBuffer (it wasn't neutered since we sliced the first one)
-      const nativeDecoded = await fallbackCtx.decodeAudioData(arrayBuffer);
+      onProgress(`Decoding attempt ${idx + 1}/${ratesToTry.length} (at ${rateLabel})...`);
+      const decoded = await tryDecode(tempCtx, bufferCopy);
       
-      onProgress("Resampling to optimized rate...");
-      const resampled = await resampleAudioBuffer(
-        nativeDecoded,
-        targetSampleRate,
-        fallbackCtx,
-        (progressMsg) => onProgress(progressMsg)
-      );
+      // If we decoded at a higher rate than target, we resample it to the target rate in JS
+      const currentRate = decoded.sampleRate;
+      if (currentRate !== targetSampleRate) {
+        onProgress(`Resampling from ${currentRate / 1000}kHz to ${targetSampleRate / 1000}kHz...`);
+        const resampled = await resampleAudioBuffer(
+          decoded,
+          targetSampleRate,
+          tempCtx,
+          onProgress
+        );
+        if (!useExisting) {
+          await tempCtx.close();
+        }
+        return resampled;
+      }
       
-      await fallbackCtx.close();
-      return resampled;
-    } catch (fallbackErr) {
-      console.error("Fallback decoding failed:", fallbackErr);
-      if (fallbackCtx) {
+      if (!useExisting) {
+        await tempCtx.close();
+      }
+      return decoded;
+    } catch (err) {
+      console.warn(`Decoding attempt ${idx + 1} at ${rateLabel} failed:`, err);
+      if (tempCtx && !useExisting) {
         try {
-          await fallbackCtx.close();
+          await tempCtx.close();
         } catch {}
       }
-      throw new Error(
-        "Unable to decode audio data. Please ensure it is a valid, uncorrupted audio file."
-      );
+      
+      if (isLast) {
+        throw new Error(
+          "Unable to decode audio data. Please ensure it is a valid, uncorrupted audio file."
+        );
+      }
     }
   }
+  
+  throw new Error("Unable to decode audio data.");
 }
 

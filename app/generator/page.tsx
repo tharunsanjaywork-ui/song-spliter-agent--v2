@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
+import { getJob } from "@/lib/api";
 
 export default function GeneratorHubPage() {
   const router = useRouter();
@@ -27,14 +28,34 @@ export default function GeneratorHubPage() {
           ? userDocSnap.data().setupComplete
           : false;
 
-        if (setupComplete) {
-          router.push("/generator/upload");
-        } else {
+        if (!setupComplete) {
           router.push("/generator/setup");
+          return;
         }
+
+        // Check if there is an active background job running or completed
+        const activeJobId = localStorage.getItem("active_split_job");
+        if (activeJobId) {
+          try {
+            const jobRes = await getJob(activeJobId);
+            if (jobRes.success && jobRes.data) {
+              const status = jobRes.data.status;
+              if (status === "processing") {
+                router.push("/generator/processing");
+                return;
+              } else if (status === "complete") {
+                router.push(`/generator/preview?jobId=${activeJobId}`);
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn("Failed to check active job status on Generator hub mount:", err);
+          }
+        }
+
+        router.push("/generator/upload");
       } catch (error) {
         console.error("Failed to check setupComplete in GeneratorHub:", error);
-        // Fallback to setup if firestore fails
         router.push("/generator/setup");
       }
     };

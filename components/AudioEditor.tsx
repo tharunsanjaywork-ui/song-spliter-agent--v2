@@ -487,7 +487,7 @@ export function AudioEditor({
               ? `[File ${i + 1}/${files.length}] ${status} (memory optimized: ${targetSampleRate / 1000}kHz)`
               : `[File ${i + 1}/${files.length}] ${status}`
           );
-        });
+        }, ctx);
         decodedBuffers.push(decoded);
         newSegments.push({
           id: uid(),
@@ -1084,7 +1084,7 @@ export function AudioEditor({
         const originalArrayBuffer = await audioFile.arrayBuffer();
         const reDecodedOriginal = await decodeAudioDataWithRetry(originalArrayBuffer, newOptimalRate, (status) => {
           setLoadingMsg(`Original file: ${status} (memory optimized: ${newOptimalRate / 1000}kHz)`);
-        });
+        }, ctx);
         currentBuffers.push(reDecodedOriginal);
       } else {
         // Safe to keep the existing decoded buffer
@@ -1105,7 +1105,7 @@ export function AudioEditor({
               ? `[Added File ${i + 1}/${files.length}] ${status} (memory optimized: ${newOptimalRate / 1000}kHz)`
               : `[Added File ${i + 1}/${files.length}] ${status}`
           );
-        });
+        }, ctx || undefined);
         newBuffers.push(decoded);
         newSegs.push({
           id: uid(),
