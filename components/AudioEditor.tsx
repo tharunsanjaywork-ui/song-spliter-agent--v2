@@ -5,7 +5,7 @@ import React, {
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
-import { audioBufferToWav, audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate } from "@/lib/audioUtils";
+import { audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate } from "@/lib/audioUtils";
 import {
   saveEditorSession,
   saveEditorSegments,
@@ -1061,7 +1061,7 @@ export function AudioEditor({
       const newOptimalRate = calculateOptimalSampleRate(newCombinedDuration);
       
       let ctx = audioCtxRef.current;
-      let currentBuffers: AudioBuffer[] = [];
+      const currentBuffers: AudioBuffer[] = [];
 
       // 3. Check if we need to downsample the existing audio buffer to save memory
       if (newOptimalRate < ctx.sampleRate) {
@@ -1072,6 +1072,7 @@ export function AudioEditor({
           await ctx.close();
         } catch {}
         
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
           sampleRate: newOptimalRate
         });

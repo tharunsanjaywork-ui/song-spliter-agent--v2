@@ -65,7 +65,7 @@ const features = [
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
   
   // States
   const [showPopup, setShowPopup] = useState(false);

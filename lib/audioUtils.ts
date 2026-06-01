@@ -114,6 +114,7 @@ export function calculateOptimalSampleRate(totalDurationSec: number): number {
   if (totalDurationSec <= 0) return 44100;
 
   const ramGB = typeof navigator !== "undefined" && "deviceMemory" in navigator
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ? (navigator as any).deviceMemory || 4
     : 4;
 
@@ -138,6 +139,7 @@ export async function audioBufferToMp3(
 ): Promise<Blob> {
   let lamejs;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     lamejs = require("lamejs");
   } catch (err) {
     throw new Error("lamejs could not be loaded client-side: " + err);
@@ -148,6 +150,7 @@ export async function audioBufferToMp3(
   const kbps = 128;
   const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mp3Data: any[] = [];
   
   const floatToInt16 = (float32: Float32Array): Int16Array => {
