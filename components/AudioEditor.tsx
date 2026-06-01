@@ -5,7 +5,7 @@ import React, {
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
-import { audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate } from "@/lib/audioUtils";
+import { audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate, decodeAudioDataWithRetry } from "@/lib/audioUtils";
 import {
   saveEditorSession,
   saveEditorSegments,
@@ -479,13 +479,15 @@ export function AudioEditor({
       let currentStart = 0;
       
       for (let i = 0; i < files.length; i++) {
-        const label = isDownsampled 
-          ? `Decoding file ${i + 1} of ${files.length} (memory optimized: ${targetSampleRate / 1000}kHz)…`
-          : `Decoding file ${i + 1} of ${files.length}…`;
-        setLoadingMsg(label);
         const file = files[i];
         const ab = await file.arrayBuffer();
-        const decoded = await ctx.decodeAudioData(ab);
+        const decoded = await decodeAudioDataWithRetry(ab, targetSampleRate, (status) => {
+          setLoadingMsg(
+            isDownsampled
+              ? `[File ${i + 1}/${files.length}] ${status} (memory optimized: ${targetSampleRate / 1000}kHz)`
+              : `[File ${i + 1}/${files.length}] ${status}`
+          );
+        });
         decodedBuffers.push(decoded);
         newSegments.push({
           id: uid(),
@@ -1080,7 +1082,9 @@ export function AudioEditor({
 
         // Re-decode the original merged file
         const originalArrayBuffer = await audioFile.arrayBuffer();
-        const reDecodedOriginal = await ctx.decodeAudioData(originalArrayBuffer);
+        const reDecodedOriginal = await decodeAudioDataWithRetry(originalArrayBuffer, newOptimalRate, (status) => {
+          setLoadingMsg(`Original file: ${status} (memory optimized: ${newOptimalRate / 1000}kHz)`);
+        });
         currentBuffers.push(reDecodedOriginal);
       } else {
         // Safe to keep the existing decoded buffer
@@ -1093,13 +1097,15 @@ export function AudioEditor({
 
       // 4. Decode all added files
       for (let i = 0; i < files.length; i++) {
-        const label = newOptimalRate < 44100
-          ? `Decoding added file ${i + 1} of ${files.length} (memory optimized: ${newOptimalRate / 1000}kHz)…`
-          : `Decoding added file ${i + 1} of ${files.length}…`;
-        setLoadingMsg(label);
         const file = files[i];
         const ab = await file.arrayBuffer();
-        const decoded = await ctx.decodeAudioData(ab);
+        const decoded = await decodeAudioDataWithRetry(ab, newOptimalRate, (status) => {
+          setLoadingMsg(
+            newOptimalRate < 44100
+              ? `[Added File ${i + 1}/${files.length}] ${status} (memory optimized: ${newOptimalRate / 1000}kHz)`
+              : `[Added File ${i + 1}/${files.length}] ${status}`
+          );
+        });
         newBuffers.push(decoded);
         newSegs.push({
           id: uid(),

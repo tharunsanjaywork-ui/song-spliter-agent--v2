@@ -5,6 +5,8 @@
  * and extracts volume/spectral features to construct the JSON analysis table for the LLM.
  */
 
+import { decodeAudioDataWithRetry } from "./audioUtils";
+
 interface Valley {
   time_sec: number;
   time_min: string;
@@ -100,13 +102,8 @@ export async function analyzeAudioFile(
   file: File,
   onProgress: (status: string) => void
 ): Promise<AnalysisResult> {
-  onProgress("Decoding audio locally...");
-  
-  const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  const audioCtx = new AudioContextClass({ sampleRate: 16000 });
-  
   const arrayBuffer = await file.arrayBuffer();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  const audioBuffer = await decodeAudioDataWithRetry(arrayBuffer, 16000, onProgress);
   
   onProgress("Mixing to mono & downsampling to 16kHz...");
   const duration = audioBuffer.duration;
@@ -428,8 +425,7 @@ export async function analyzeAudioFile(
   const targetSongs = Math.max(2, Math.round(duration / (4.5 * 60)));
   const strongCandidates = valleys.filter((v) => v.is_candidate && v.depth_db < -42.0);
   
-  // Close context to release Web Audio resources
-  await audioCtx.close();
+  // Context was managed and closed internally during decoding/resampling
   
   return {
     metadata: {

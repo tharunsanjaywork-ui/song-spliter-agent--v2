@@ -205,3 +205,129 @@ export async function audioBufferToMp3(
   
   return new Blob(mp3Data, { type: "audio/mp3" });
 }
+
+/**
+ * Resamples an AudioBuffer to a target sample rate in JS.
+ * Uses a linear resampler and yields execution in chunks to prevent the UI from freezing.
+ */
+export async function resampleAudioBuffer(
+  originalBuffer: AudioBuffer,
+  targetSampleRate: number,
+  ctx: AudioContext,
+  onProgress?: (progressMsg: string) => void
+): Promise<AudioBuffer> {
+  const numChannels = originalBuffer.numberOfChannels;
+  const originalSr = originalBuffer.sampleRate;
+  if (originalSr === targetSampleRate) {
+    return originalBuffer;
+  }
+  
+  const ratio = originalSr / targetSampleRate;
+  const newLength = Math.round(originalBuffer.length / ratio);
+  const resampledBuffer = ctx.createBuffer(numChannels, newLength, targetSampleRate);
+  
+  for (let ch = 0; ch < numChannels; ch++) {
+    const originalData = originalBuffer.getChannelData(ch);
+    const resampledData = resampledBuffer.getChannelData(ch);
+    
+    // Process in chunks to prevent UI blocking
+    const chunkSize = 5000000; // 5M samples per yield
+    for (let i = 0; i < newLength; i += chunkSize) {
+      const end = Math.min(newLength, i + chunkSize);
+      for (let j = i; j < end; j++) {
+        const srcIndex = j * ratio;
+        const indexLow = Math.floor(srcIndex);
+        const indexHigh = Math.min(originalData.length - 1, indexLow + 1);
+        const weight = srcIndex - indexLow;
+        resampledData[j] = originalData[indexLow] * (1 - weight) + originalData[indexHigh] * weight;
+      }
+      
+      if (onProgress) {
+        onProgress(`Resampling channel ${ch + 1}/${numChannels}: ${Math.round((end / newLength) * 100)}%`);
+      }
+      // Yield to event loop
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  
+  return resampledBuffer;
+}
+
+/**
+ * Decodes an audio file array buffer into an AudioBuffer at a target sample rate.
+ * Uses a robust retry fallback sequence:
+ * 1. Tries to decode directly at the target sample rate (memory optimized).
+ * 2. If it fails with an EncodingError (common in Chromium for low/non-native rates on large files),
+ *    it decodes at the default native hardware sample rate and then resamples the buffer in JS.
+ * 3. Handles neutering of ArrayBuffers during retry by slicing copies.
+ */
+export async function decodeAudioDataWithRetry(
+  arrayBuffer: ArrayBuffer,
+  targetSampleRate: number,
+  onProgress: (status: string) => void
+): Promise<AudioBuffer> {
+  const AudioContextClass = typeof window !== "undefined"
+    ? (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+    : null;
+    
+  if (!AudioContextClass) {
+    throw new Error("Web Audio API is not supported in this environment.");
+  }
+  
+  // Keep the original buffer safe from neutering by slicing it for the first attempt
+  const firstAttemptBuffer = arrayBuffer.slice(0);
+  
+  onProgress("Initializing optimized decoder...");
+  // Try decoding at the target sample rate first
+  let primaryCtx: AudioContext | null = null;
+  try {
+    primaryCtx = new AudioContextClass({ sampleRate: targetSampleRate });
+    onProgress(`Decoding at optimized sample rate (${targetSampleRate / 1000}kHz)...`);
+    const decoded = await primaryCtx.decodeAudioData(firstAttemptBuffer);
+    // Success! Close context and return the decoded buffer
+    await primaryCtx.close();
+    return decoded;
+  } catch (err) {
+    console.warn(`Direct decoding at ${targetSampleRate}Hz failed, trying native rate fallback:`, err);
+    if (primaryCtx) {
+      try {
+        await primaryCtx.close();
+      } catch {}
+    }
+    
+    onProgress("Optimized decoding failed. Retrying with native rate...");
+    
+    // Fallback: decode using native hardware sample rate (no options), then resample manually
+    let fallbackCtx: AudioContext | null = null;
+    try {
+      fallbackCtx = new AudioContextClass(); // native sample rate, typically 44.1kHz or 48kHz
+      const nativeSr = fallbackCtx.sampleRate;
+      onProgress(`Decoding at native sample rate (${nativeSr / 1000}kHz)...`);
+      
+      // Use the original arrayBuffer (it wasn't neutered since we sliced the first one)
+      const nativeDecoded = await fallbackCtx.decodeAudioData(arrayBuffer);
+      
+      onProgress("Resampling to optimized rate...");
+      const resampled = await resampleAudioBuffer(
+        nativeDecoded,
+        targetSampleRate,
+        fallbackCtx,
+        (progressMsg) => onProgress(progressMsg)
+      );
+      
+      await fallbackCtx.close();
+      return resampled;
+    } catch (fallbackErr) {
+      console.error("Fallback decoding failed:", fallbackErr);
+      if (fallbackCtx) {
+        try {
+          await fallbackCtx.close();
+        } catch {}
+      }
+      throw new Error(
+        "Unable to decode audio data. Please ensure it is a valid, uncorrupted audio file."
+      );
+    }
+  }
+}
+
