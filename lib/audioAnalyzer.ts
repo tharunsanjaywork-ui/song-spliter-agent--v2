@@ -138,9 +138,19 @@ export async function analyzeAudioFile(
   
   onProgress("Extracting fine energy envelope...");
   
-  // Calculate fine energy at 10ms resolution (sr * 0.01 = 160 hop size, 50ms window = 800 samples)
-  const hopFine = 160;
-  const frameLength = 800;
+  // Device performance detection
+  const cores = typeof navigator !== "undefined" ? (navigator.hardwareConcurrency || 4) : 4;
+  const isMobile = typeof navigator !== "undefined" ? /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) : false;
+  
+  // Choose settings based on performance
+  // Default (High Performance): hopFine = 160 (10ms), fftSize = 2048
+  // Low Performance (low core count or mobile): hopFine = 320 (20ms), fftSize = 1024
+  const useLowSpec = isMobile || cores <= 4;
+  const hopFine = useLowSpec ? 320 : 160;
+  const fftSize = useLowSpec ? 1024 : 2048;
+  const frameDuration = hopFine / targetSr;
+  
+  const frameLength = useLowSpec ? 512 : 800;
   const rmsFine: number[] = [];
   const tFine: number[] = [];
   
@@ -189,7 +199,7 @@ export async function analyzeAudioFile(
   // Identify silence valleys (energy below -40.0dB, duration >= 80ms)
   const valleys: Valley[] = [];
   const valleyDbThreshold = -40.0;
-  const minValleyFrames = Math.round(0.08 / 0.01); // ~8 frames at 10ms hops
+  const minValleyFrames = Math.round(0.08 / frameDuration); // ~8 frames at 10ms hops, ~4 frames at 20ms hops
   let inValley = false;
   let valleyStartFrame = 0;
   
@@ -213,11 +223,11 @@ export async function analyzeAudioFile(
         }
         const timeSec = tFine[deepestFrame];
         const depth = rmsDb[deepestFrame];
-        const durSec = durationFrames * 0.01;
+        const durSec = durationFrames * frameDuration;
         
-        // check recovers: any value in the next 0.5s (50 frames) is > -15.0dB
+        // check recovers: any value in the next 0.5s is > -15.0dB
         let recovers = false;
-        const recoveryLimit = Math.min(i + 50, rmsDb.length);
+        const recoveryLimit = Math.min(i + Math.round(0.5 / frameDuration), rmsDb.length);
         for (let k = i; k < recoveryLimit; k++) {
           if (rmsDb[k] > -15.0) {
             recovers = true;
@@ -226,7 +236,7 @@ export async function analyzeAudioFile(
         }
         
         // fade_before: mean energy of first half of preceding 1.5s is greater than second half
-        const fadeLo = Math.max(0, deepestFrame - 150);
+        const fadeLo = Math.max(0, deepestFrame - Math.round(1.5 / frameDuration));
         let fadeBefore = true;
         if (valleyStartFrame - fadeLo > 4) {
           const fadeSeg = rmsDb.slice(fadeLo, valleyStartFrame);
@@ -254,7 +264,6 @@ export async function analyzeAudioFile(
   onProgress("Running spectral transition analysis (FFT)...");
   
   // Calculate Spectral Centroid (Timbre) and Spectral Flux (Chroma Key/Novelty proxies)
-  const fftSize = 2048;
   const fftRe = new Float32Array(fftSize);
   const fftIm = new Float32Array(fftSize);
   

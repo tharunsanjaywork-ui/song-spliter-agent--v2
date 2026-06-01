@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
-import { motion, AnimatePresence } from "framer-motion";
+
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -14,15 +14,24 @@ export default function Navbar() {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"about" | "privacy">("about");
 
   const handleLogout = async () => {
     try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("active_route");
+        localStorage.removeItem("active_split_job");
+        localStorage.removeItem("active_generator_route");
+      }
       await signOut(getFirebaseAuth());
       router.push("/");
     } catch (error) {
       console.error("Logout failed:", error);
+    }
+  };
+
+  const clearActiveRoute = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("active_route");
     }
   };
 
@@ -54,6 +63,7 @@ export default function Navbar() {
             <div className="flex-shrink-0 flex items-center">
               <Link
                 href="/welcome"
+                onClick={clearActiveRoute}
                 className="flex items-center gap-2.5 group transition duration-300 hover:scale-[1.02]"
               >
                 {/* Animated Premium Glass Waveform Logo */}
@@ -78,6 +88,7 @@ export default function Navbar() {
                   <Link
                     key={link.name}
                     href={link.href}
+                    onClick={clearActiveRoute}
                     className={`font-body text-xs font-semibold tracking-wider uppercase px-3 py-1.5 rounded-xl transition-all duration-300 border ${
                       isActive
                         ? "bg-[rgba(0,212,255,0.06)] border-[rgba(0,212,255,0.25)] text-[var(--accent-cyan)] shadow-[0_0_15px_rgba(0,212,255,0.15)]"
@@ -120,7 +131,8 @@ export default function Navbar() {
                   <button
                     onClick={() => {
                       setIsDropdownOpen(false);
-                      setIsSettingsOpen(true);
+                      clearActiveRoute();
+                      router.push("/settings");
                     }}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-body text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(255,255,255,0.05)] text-left transition"
                   >
@@ -129,6 +141,7 @@ export default function Navbar() {
                   <button
                     onClick={() => {
                       setIsDropdownOpen(false);
+                      clearActiveRoute();
                       handleLogout();
                     }}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-body text-[var(--error)] hover:bg-[rgba(239,68,68,0.08)] text-left transition"
@@ -173,7 +186,10 @@ export default function Navbar() {
               <Link
                 key={link.name}
                 href={link.href}
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setIsOpen(false);
+                  clearActiveRoute();
+                }}
                 className={`block font-body text-sm font-medium py-2 px-3 rounded-lg transition ${
                   isActive
                     ? "bg-[rgba(0,212,255,0.08)] text-[var(--accent-cyan)]"
@@ -205,7 +221,8 @@ export default function Navbar() {
             <button
               onClick={() => {
                 setIsOpen(false);
-                setIsSettingsOpen(true);
+                clearActiveRoute();
+                router.push("/settings");
               }}
               className="w-full font-body text-xs py-2 px-3 text-center border border-[var(--glass-border)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.08)] text-[var(--text-primary)] rounded-lg font-medium transition"
             >
@@ -225,136 +242,6 @@ export default function Navbar() {
         </div>
       )}
 
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {isSettingsOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          >
-            <div
-              className="absolute inset-0"
-              onClick={() => setIsSettingsOpen(false)}
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 350, damping: 25 }}
-              className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-2xl flex flex-col max-h-[80vh] overflow-hidden"
-            >
-              {/* Close Button */}
-              <button
-                onClick={() => setIsSettingsOpen(false)}
-                className="absolute top-4 right-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-lg transition"
-                aria-label="Close settings"
-              >
-                ✕
-              </button>
-
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-[rgba(0,212,255,0.08)] flex items-center justify-center border border-[rgba(0,212,255,0.2)] text-[var(--accent-cyan)] text-lg">
-                  ⚙️
-                </div>
-                <div>
-                  <h3 className="font-heading text-lg font-bold text-[var(--text-primary)]">
-                    Settings
-                  </h3>
-                  <p className="font-body text-[10px] text-[var(--text-muted)]">
-                    Information & Policy Overview
-                  </p>
-                </div>
-              </div>
-
-              {/* Tabs navigation */}
-              <div className="flex border-b border-[var(--glass-border)] mb-5">
-                <button
-                  onClick={() => setSettingsTab("about")}
-                  className={`flex-1 pb-2.5 text-xs font-semibold font-body border-b-2 transition ${
-                    settingsTab === "about"
-                      ? "border-[var(--accent-cyan)] text-[var(--text-primary)]"
-                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  About Us
-                </button>
-                <button
-                  onClick={() => setSettingsTab("privacy")}
-                  className={`flex-1 pb-2.5 text-xs font-semibold font-body border-b-2 transition ${
-                    settingsTab === "privacy"
-                      ? "border-[var(--accent-cyan)] text-[var(--text-primary)]"
-                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  Privacy Policy
-                </button>
-              </div>
-
-              {/* Tab Contents */}
-              <div className="flex-1 overflow-y-auto pr-1 space-y-4 font-body text-xs leading-relaxed text-[var(--text-secondary)]">
-                {settingsTab === "about" ? (
-                  <div className="space-y-4">
-                    <p>
-                      <strong>AudioWave</strong> is a premium, AI-integrated browser utility engineered for high-performance audio separation and editing. We empower musicians, sound designers, and content creators with advanced editing capabilities directly on the web.
-                    </p>
-                    <p>
-                      Our key features include:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li><strong>AI Audio Splitter</strong>: Separate music into vocals, drums, bass, and instrumental stems using cutting-edge deep learning.</li>
-                      <li><strong>Waveform Audio Editor</strong>: High-fidelity waveform decoding, non-adjacent merging, precise cursor cutting, and batch WAV exports.</li>
-                      <li><strong>Local Browser Audio Engine</strong>: File imports, waveform visualization, and buffer slicing are processed entirely on-device, offering instant speed and 100% offline capability.</li>
-                    </ul>
-                    <p className="text-[var(--text-muted)] pt-2 border-t border-[rgba(255,255,255,0.05)]">
-                      Version 2.0.0 · Powered by Next.js & Web Audio API
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3.5">
-                    <p>
-                      Your privacy is extremely important to us. Here is how we collect, process, and protect your data:
-                    </p>
-                    <div>
-                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">📁 Audio Processing Privacy</h4>
-                      <p>
-                        All song files loaded into the Audio Editor are decoded and processed <strong>entirely locally</strong> inside your web browser. Your music files never leave your computer and are never uploaded to any remote server.
-                      </p>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">🔗 AI Separation Pipeline</h4>
-                      <p>
-                        When using the AI Splitter, files are uploaded securely over SSL to our dedicated inference queue, processed, and the resulting stems are returned. All source files and output stems are automatically deleted immediately after download.
-                      </p>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">💾 State Retention & Storage</h4>
-                      <p>
-                        We store project preferences, selection states, and timelines in your browser&apos;s local and session storage to provide a seamless refresh persistence.
-                      </p>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-[var(--accent-cyan)] mb-1">🛡️ No Ad Tracking</h4>
-                      <p>
-                        AudioWave does not use advertising tracking scripts, tracking cookies, or share user details with third-party marketing services.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Close Button Footer */}
-              <button
-                onClick={() => setIsSettingsOpen(false)}
-                className="mt-6 w-full py-2.5 font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] hover:from-[var(--accent-cyan)] hover:to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:scale-[1.01] active:scale-[0.99] transition transform text-xs"
-              >
-                Close Settings
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </nav>
   );
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
+import { getJob } from "@/lib/api";
 
 export default function GeneratorHubPage() {
   const router = useRouter();
@@ -19,6 +20,39 @@ export default function GeneratorHubPage() {
 
     const checkSetup = async () => {
       try {
+        if (typeof window !== "undefined") {
+          // 1. Check for active generator route persistence
+          const activeRoute = localStorage.getItem("active_generator_route");
+          if (activeRoute && activeRoute !== "/generator") {
+            router.push(activeRoute);
+            return;
+          }
+
+          // 2. Fallback check for active split job status
+          const activeJob = localStorage.getItem("active_split_job");
+          if (activeJob) {
+            try {
+              const res = await getJob(activeJob);
+              if (res.success && res.data) {
+                const status = res.data.status;
+                if (status === "complete") {
+                  router.push(`/generator/preview?jobId=${activeJob}`);
+                  return;
+                } else if (status === "processing") {
+                  router.push("/generator/processing");
+                  return;
+                }
+              }
+              // If status is failed or job not found, clear it
+              localStorage.removeItem("active_split_job");
+            } catch {
+              // Network error, redirect to processing page to let it retry/reconnect
+              router.push("/generator/processing");
+              return;
+            }
+          }
+        }
+
         const db = getFirebaseDb();
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);

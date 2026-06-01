@@ -237,48 +237,23 @@ export default function LoginPage() {
   // Display initial loading screen while checking auth status
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] flex items-center justify-center">
+      <div className="min-h-screen bg-background text-on-surface flex items-center justify-center">
         <div className="flex flex-col items-center">
-          <div className="w-12 h-12 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin mb-4"></div>
-          <span className="font-body text-[var(--text-secondary)] animate-pulse">Loading AudioWave...</span>
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+          <span className="font-body-md text-on-surface-variant animate-pulse">Loading AudioWave...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] relative overflow-hidden flex items-center justify-center p-4">
-      {/* 20-30 Floating background particles as specified in PRD */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {Array.from({ length: 25 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute bg-[var(--accent-cyan)] rounded-full opacity-[0.03]"
-            style={{
-              width: `${Math.random() * 8 + 4}px`,
-              height: `${Math.random() * 8 + 4}px`,
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animation: `float ${Math.random() * 20 + 20}s infinite linear`,
-              animationDelay: `${Math.random() * -10}s`,
-            }}
-          />
-        ))}
+    <div className="min-h-screen bg-background text-on-surface relative overflow-hidden flex items-center justify-center p-4">
+      {/* Ambient background blur orbs */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/10 blur-[150px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-secondary-container/20 blur-[120px]" />
+        <div className="absolute inset-0 bg-grid-pattern opacity-30" />
       </div>
-
-      <style jsx global>{`
-        @keyframes float {
-          0% {
-            transform: translateY(0) translateX(0) scale(1);
-          }
-          50% {
-            transform: translateY(-80px) translateX(40px) scale(1.2);
-          }
-          100% {
-            transform: translateY(0) translateX(0) scale(1);
-          }
-        }
-      `}</style>
 
       {/* Recaptcha Container */}
       <div id="recaptcha-container"></div>
@@ -287,26 +262,29 @@ export default function LoginPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+        className="w-full max-w-md z-10"
       >
         {/* Main Card */}
         <motion.div
           key={shakeKey}
           animate={error ? { x: [0, -8, 8, -8, 8, 0] } : {}}
           transition={{ duration: 0.4 }}
-          className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-8 backdrop-blur-md shadow-2xl transition-all duration-300 hover:border-[rgba(0,212,255,0.2)] hover:shadow-[0_0_30px_rgba(0,212,255,0.06)]"
+          className="relative bg-surface-container/60 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl overflow-hidden"
         >
+          {/* Inner edge lighting border */}
+          <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none z-20" />
+
           {/* App Brand Header */}
           <div className="text-center mb-6">
             <motion.h1
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, ease: "easeOut" }}
-              className="font-heading text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent mb-2"
+              className="font-display-lg text-display-lg text-on-surface tracking-tight mb-2"
             >
               AudioWave
             </motion.h1>
-            <p className="font-body text-sm text-[var(--text-secondary)] select-none">
+            <p className="font-body-md text-body-md text-on-surface-variant select-none">
               {"Edit audio. Split mixtapes. Powered by AI.".split("").map((char, index) => (
                 <motion.span
                   key={index}
@@ -325,34 +303,34 @@ export default function LoginPage() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.8, duration: 0.4 }}
-            className="flex bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] rounded-xl p-1 mb-6 animate-stagger-item"
+            className="flex bg-surface-container-high/50 rounded-xl p-1 mb-6 border border-white/5"
           >
             <button
               onClick={() => setActiveTab("login")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
+              className={`flex-1 font-body-md text-technical-sm py-2 px-3 rounded-lg font-medium transition duration-200 ${
                 activeTab === "login"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  ? "bg-surface-variant text-primary"
+                  : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               Sign In
             </button>
             <button
               onClick={() => setActiveTab("signup")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
+              className={`flex-1 font-body-md text-technical-sm py-2 px-3 rounded-lg font-medium transition duration-200 ${
                 activeTab === "signup"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  ? "bg-surface-variant text-primary"
+                  : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               Sign Up
             </button>
             <button
               onClick={() => setActiveTab("phone")}
-              className={`flex-1 font-body text-xs py-2 px-3 rounded-lg font-medium transition duration-200 ${
+              className={`flex-1 font-body-md text-technical-sm py-2 px-3 rounded-lg font-medium transition duration-200 ${
                 activeTab === "phone"
-                  ? "bg-[rgba(255,255,255,0.06)] text-[var(--accent-cyan)] border border-[rgba(255,255,255,0.04)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  ? "bg-surface-variant text-primary"
+                  : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               Phone Login
@@ -366,10 +344,10 @@ export default function LoginPage() {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="mb-4 p-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[var(--error)] text-xs rounded-xl flex items-start gap-2"
+                className="mb-4 p-3 bg-error-container/20 border border-error/30 text-error text-xs rounded-xl flex items-start gap-2"
               >
-                <span>⚠️</span>
-                <span className="font-body">{DOMPurify.sanitize(error, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
+                <span className="material-symbols-outlined text-[18px]">warning</span>
+                <span className="font-body-md">{DOMPurify.sanitize(error, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
               </motion.div>
             )}
 
@@ -378,10 +356,10 @@ export default function LoginPage() {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="mb-4 p-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[var(--success)] text-xs rounded-xl flex items-start gap-2"
+                className="mb-4 p-3 bg-tertiary/10 border border-tertiary/30 text-tertiary text-xs rounded-xl flex items-start gap-2"
               >
-                <span>✅</span>
-                <span className="font-body">{DOMPurify.sanitize(success, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
+                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                <span className="font-body-md">{DOMPurify.sanitize(success, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })}</span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -398,38 +376,47 @@ export default function LoginPage() {
                 className="space-y-4"
               >
                 <div className="space-y-1.5 animate-stagger-item" style={{ animationDelay: "1.9s" }}>
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Email Address</label>
+                  <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px]">mail</span>
+                    Email Address
+                  </label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@domain.com"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                   />
                 </div>
 
                 <div className="space-y-1.5 animate-stagger-item" style={{ animationDelay: "2.0s" }}>
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Password</label>
+                  <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px]">lock</span>
+                    Password
+                  </label>
                   <input
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full font-body py-3 px-4 mt-2 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                  className="w-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold rounded-full py-3 ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                 >
                   {loading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-5 h-5 border-2 border-on-surface border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    "Sign In with Email"
+                    <>
+                      <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>login</span>
+                      Sign In with Email
+                    </>
                   )}
                 </button>
               </motion.form>
@@ -445,50 +432,62 @@ export default function LoginPage() {
                 className="space-y-4"
               >
                 <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Email Address</label>
+                  <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px]">mail</span>
+                    Email Address
+                  </label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@domain.com"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Create Password</label>
+                  <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px]">lock</span>
+                    Create Password
+                  </label>
                   <input
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Minimum 6 characters"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Confirm Password</label>
+                  <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px]">lock</span>
+                    Confirm Password
+                  </label>
                   <input
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Repeat your password"
                     required
-                    className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                    className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full font-body py-3 px-4 mt-2 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                  className="w-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold rounded-full py-3 ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                 >
                   {loading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-5 h-5 border-2 border-on-surface border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    "Register & Sign Up"
+                    <>
+                      <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>person_add</span>
+                      Register & Sign Up
+                    </>
                   )}
                 </button>
               </motion.form>
@@ -505,16 +504,19 @@ export default function LoginPage() {
                 {phoneStep === "input" ? (
                   <form onSubmit={handleSendCode} className="space-y-4">
                     <div className="space-y-1.5">
-                      <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Phone Number</label>
+                      <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[18px]">phone</span>
+                        Phone Number
+                      </label>
                       <input
                         type="tel"
                         value={phoneNumber}
                         onChange={(e) => setPhoneNumber(e.target.value)}
                         placeholder="e.g. +919876543210"
                         required
-                        className="w-full font-body text-sm py-2.5 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                        className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-body-md text-body-md text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                       />
-                      <span className="font-body text-[10px] text-[var(--text-muted)]">
+                      <span className="font-technical-xs text-technical-xs text-on-surface-variant">
                         Include country code prefix (e.g. +91 for India).
                       </span>
                     </div>
@@ -522,12 +524,15 @@ export default function LoginPage() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full font-body py-3 px-4 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                      className="w-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold rounded-full py-3 ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                     >
                       {loading ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-5 h-5 border-2 border-on-surface border-t-transparent rounded-full animate-spin" />
                       ) : (
-                        "Send Verification Code"
+                        <>
+                          <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>sms</span>
+                          Send Verification Code
+                        </>
                       )}
                     </button>
                   </form>
@@ -535,11 +540,14 @@ export default function LoginPage() {
                   <form onSubmit={handleVerifyCode} className="space-y-4">
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
-                        <label className="font-body text-xs font-semibold text-[var(--text-secondary)]">Verification Code</label>
+                        <label className="font-technical-sm text-technical-sm text-on-surface-variant flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[18px]">pin</span>
+                          Verification Code
+                        </label>
                         <button
                           type="button"
                           onClick={() => setPhoneStep("input")}
-                          className="font-body text-xs text-[var(--accent-cyan)] hover:underline"
+                          className="font-technical-sm text-technical-sm text-primary hover:underline font-semibold"
                         >
                           Change Number
                         </button>
@@ -551,19 +559,22 @@ export default function LoginPage() {
                         placeholder="Enter 6-digit SMS code"
                         maxLength={6}
                         required
-                        className="w-full font-mono text-center text-lg tracking-widest py-2 px-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-4 focus:ring-[rgba(0,212,255,0.15)] transition"
+                        className="w-full bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant rounded-lg py-3 px-4 font-technical-sm text-[20px] text-center tracking-widest text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-outline-variant transition"
                       />
                     </div>
 
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full font-body py-3 px-4 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white font-semibold rounded-xl transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                      className="w-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold rounded-full py-3 ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                     >
                       {loading ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-5 h-5 border-2 border-on-surface border-t-transparent rounded-full animate-spin" />
                       ) : (
-                        "Verify & Sign In"
+                        <>
+                          <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>verified</span>
+                          Verify & Sign In
+                        </>
                       )}
                     </button>
                   </form>
@@ -580,9 +591,9 @@ export default function LoginPage() {
             className="relative my-6 flex items-center justify-center"
           >
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-[var(--text-muted)]"></div>
+              <div className="w-full border-t border-outline-variant"></div>
             </div>
-            <span className="relative font-body text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-surface)] px-3 py-1 rounded-full border border-[var(--glass-border)] backdrop-blur-md">
+            <span className="relative font-body-md text-technical-xs text-on-surface-variant bg-surface px-3 py-1 rounded-full border border-outline-variant/50 backdrop-blur-md">
               or continue with
             </span>
           </motion.div>
@@ -595,7 +606,7 @@ export default function LoginPage() {
               transition={{ delay: 2.2, duration: 0.4 }}
               onClick={handleGoogleLogin}
               disabled={loading}
-              className="flex items-center justify-center gap-2 font-body text-xs py-2.5 px-3 border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] rounded-lg font-medium text-[var(--text-primary)] transition hover:border-[rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+              className="flex items-center justify-center gap-2 border border-outline-variant bg-surface-container-lowest/50 hover:bg-surface-container-low rounded-xl py-3 font-body-md text-on-surface font-semibold transition hover:border-primary/30 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100"
             >
               {/* Google SVG Icon */}
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -609,7 +620,7 @@ export default function LoginPage() {
               transition={{ delay: 2.3, duration: 0.4 }}
               onClick={handleAppleLogin}
               disabled={loading}
-              className="flex items-center justify-center gap-2 font-body text-xs py-2.5 px-3 border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] rounded-lg font-medium text-[var(--text-primary)] transition hover:border-[rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+              className="flex items-center justify-center gap-2 border border-outline-variant bg-surface-container-lowest/50 hover:bg-surface-container-low rounded-xl py-3 font-body-md text-on-surface font-semibold transition hover:border-primary/30 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100"
             >
               {/* Apple SVG Icon */}
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">

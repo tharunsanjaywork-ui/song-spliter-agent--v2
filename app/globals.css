@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  /* Colors from BEHAVIOUR.md & UI_UX.md */
+  /* Legacy Colors — kept for unredesigned pages (Welcome, Setup, Editor, Correction Editor) */
   --bg-deep: #080C14;
   --bg-surface: #0D1421;
   --glass-bg: rgba(255, 255, 255, 0.04);
@@ -11,6 +11,7 @@
   --accent-cyan: #00D4FF;
   --accent-violet: #7B5EA7;
   --accent-gradient: linear-gradient(135deg, #00D4FF, #7B5EA7);
+  --accent-orange: #FF6B35;
   --text-primary: #F0F4FF;
   --text-secondary: #7A8BA0;
   --text-muted: #3D4F63;
@@ -30,14 +31,121 @@ body {
   background: var(--bg-deep);
 }
 
+/* ── Material Symbols default settings ───────────────────────────────────── */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+/* ── Font utility classes (backward-compat + new design) ─────────────────── */
 @layer utilities {
   .font-heading {
-    font-family: var(--font-heading), sans-serif;
+    font-family: var(--font-inter), sans-serif;
   }
   .font-body {
-    font-family: var(--font-body), sans-serif;
+    font-family: var(--font-inter), sans-serif;
   }
   .font-mono {
     font-family: var(--font-mono), monospace;
   }
+}
+
+/* ── New Design System — Keyframes ───────────────────────────────────────── */
+
+@keyframes pulse-border {
+  0%,
+  100% {
+    border-color: rgba(199, 191, 255, 0.2);
+  }
+  50% {
+    border-color: rgba(199, 191, 255, 0.8);
+  }
+}
+
+@keyframes neon-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(68, 43, 189, 0.5),
+      inset 0 0 5px rgba(68, 43, 189, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(199, 191, 255, 0.7),
+      inset 0 0 10px rgba(199, 191, 255, 0.5);
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Legacy borderPulse (kept for backward compat if referenced) */
+@keyframes borderPulse {
+  0%,
+  100% {
+    border-color: var(--glass-border);
+  }
+  50% {
+    border-color: rgba(0, 212, 255, 0.3);
+  }
+}
+
+/* ── New Design System — Utility Classes ─────────────────────────────────── */
+
+.animate-pulse-border {
+  animation: pulse-border 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.ai-glow:hover {
+  animation: neon-glow 2s ease-in-out infinite;
+}
+
+.bg-grid-pattern {
+  background-image: linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px
+    );
+  background-size: 40px 40px;
+}
+
+.glass-edge {
+  box-shadow: inset 1px 1px 0px 0px rgba(255, 255, 255, 0.05);
+}
+
+.bg-gradient-spinner {
+  background: conic-gradient(from 0deg, #442bbd, #a8e8ff, #442bbd);
+}
+
+.pulse-border {
+  animation: borderPulse 3s infinite ease-in-out;
+}
+
+/* ── Custom Scrollbar ────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #353534;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3c494e;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

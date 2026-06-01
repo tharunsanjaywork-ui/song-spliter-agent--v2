@@ -8,7 +8,7 @@ import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { getJob, renameFile, JobFile, JobData } from "@/lib/api";
 
-// ─── Helpers ────────────────--------------------------------------------------
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -21,7 +21,30 @@ function buildDisplayName(file: JobFile, index: number): string {
   return `Unidentified Song ${String(index + 1).padStart(2, "0")}`;
 }
 
-// ─── WaveSurfer Audio Player Component ────────────────----------------────────
+// ─── Decorative Waveform Bars Component ────────────────────────────────────────
+
+const WaveformBars = ({ isPlaying }: { isPlaying: boolean }) => {
+  return (
+    <div className="flex items-center gap-[3px] h-6 flex-shrink-0 w-14 justify-center">
+      {[12, 18, 8, 22, 14, 20, 10].map((h, i) => (
+        <div
+          key={i}
+          className={`w-[3px] rounded-full transition-all duration-300 ${
+            isPlaying ? "bg-primary animate-wave-bounce" : "bg-on-surface-variant/30"
+          }`}
+          style={{
+            height: isPlaying ? "100%" : `${h}px`,
+            maxHeight: `${h}px`,
+            animationDelay: `${i * 0.12}s`,
+            transformOrigin: "bottom",
+          }}
+        />
+      ))}
+    </div>
+  );
+};
+
+// ─── WaveSurfer Audio Player Component ────────────────────────────────────────
 
 interface AudioPlayerProps {
   url: string;
@@ -48,21 +71,23 @@ function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ws: any;
+    let cancelled = false;
 
     import("wavesurfer.js").then(({ default: WaveSurfer }) => {
-      if (!containerRef.current) return;
+      if (cancelled || !containerRef.current) return;
       ws = WaveSurfer.create({
         container: containerRef.current!,
-        waveColor: "#1E3A4A",        // --waveform-empty
-        progressColor: "#00D4FF",    // --waveform-filled
-        cursorColor: "#FF6B35",      // --waveform-cursor
-        height: 48,
+        waveColor: "#3c494e",
+        progressColor: "#a8e8ff",
+        cursorColor: "#00d4ff",
+        height: 32,
         normalize: true,
         interact: true,
         backend: "MediaElement",
       });
 
       ws.on("ready", () => {
+        if (cancelled) return;
         setIsReady(true);
         setDuration(ws.getDuration());
         if (isPlaying) {
@@ -71,10 +96,12 @@ function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }
       });
 
       ws.on("timeupdate", (t: number) => {
+        if (cancelled) return;
         setCurrentTime(t);
       });
 
       ws.on("finish", () => {
+        if (cancelled) return;
         onPlayToggle();
       });
 
@@ -83,7 +110,10 @@ function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }
     });
 
     return () => {
-      ws?.destroy();
+      cancelled = true;
+      if (ws) {
+        ws.destroy();
+      }
       wavesurferRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,60 +130,31 @@ function AudioPlayer({ url, isActive, isPlaying, onPlayToggle, initialDuration }
   }, [isPlaying, isReady, isActive]);
 
   if (!isActive) {
-    return (
-      <div className="flex items-center gap-3 mt-3">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onPlayToggle();
-          }}
-          aria-label="Play preview"
-          className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.06)] border border-[rgba(255,255,255,0.05)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] hover:border-[rgba(0,212,255,0.3)] hover:bg-[rgba(0,212,255,0.08)] transition flex-shrink-0"
-        >
-          ▶
-        </button>
-        {/* Placeholder waveform visualization */}
-        <div className="flex-1 h-8 flex items-center gap-[3px] opacity-20">
-          {Array.from({ length: 45 }).map((_, i) => {
-            const h = 4 + Math.sin(i * 0.2) * 14 + Math.cos(i * 0.5) * 6;
-            return (
-              <div
-                key={i}
-                className="flex-1 bg-[var(--text-muted)] rounded-full"
-                style={{ height: `${Math.max(4, Math.abs(h))}px` }}
-              />
-            );
-          })}
-        </div>
-        <span className="font-mono text-xs text-[var(--text-muted)] flex-shrink-0">
-          0:00&nbsp;/&nbsp;{formatDuration(initialDuration)}
-        </span>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="flex items-center gap-3 mt-3">
+    <div className="flex items-center gap-3">
       <button
         onClick={(e) => {
           e.stopPropagation();
           onPlayToggle();
         }}
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="w-8 h-8 rounded-full bg-[rgba(0,212,255,0.12)] border border-[rgba(0,212,255,0.3)] flex items-center justify-center text-[var(--accent-cyan)] hover:bg-[rgba(0,212,255,0.2)] transition flex-shrink-0 flex items-center justify-center"
+        className="w-8 h-8 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center text-primary hover:bg-primary/20 transition flex-shrink-0"
       >
         {!isReady ? (
-          <div className="w-3.5 h-3.5 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
+          <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         ) : isPlaying ? (
-          "⏸"
+          <span className="material-symbols-outlined text-[16px]">pause</span>
         ) : (
-          "▶"
+          <span className="material-symbols-outlined text-[16px]">play_arrow</span>
         )}
       </button>
 
       <div ref={containerRef} className="flex-1 min-w-0" />
 
-      <span className="font-mono text-xs text-[var(--text-muted)] flex-shrink-0">
+      <span className="font-technical-xs text-xs text-on-surface-variant flex-shrink-0">
         {formatDuration(currentTime)}&nbsp;/&nbsp;{formatDuration(duration)}
       </span>
     </div>
@@ -192,7 +193,7 @@ function RenameInput({ value, onChange, onCommit, onCancel }: RenameInputProps) 
       onBlur={onCommit}
       onKeyDown={handleKeyDown}
       maxLength={80}
-      className="w-full font-body text-sm bg-transparent border-b border-[var(--accent-cyan)] text-[var(--text-primary)] outline-none pb-0.5"
+      className="w-full font-body-md text-sm bg-transparent border-b border-primary text-on-surface outline-none pb-0.5"
     />
   );
 }
@@ -227,43 +228,45 @@ function FileCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05, duration: 0.4, ease: "easeOut" }}
-      className={`bg-[var(--glass-bg)] border rounded-2xl p-5 backdrop-blur-md transition-all duration-200 ${
-        checked
-          ? "border-[rgba(0,212,255,0.2)] shadow-[0_0_20px_rgba(0,212,255,0.04)]"
-          : "border-[rgba(255,255,255,0.04)] opacity-60"
+      className={`bg-surface-container-low backdrop-blur-md border rounded-xl p-4 glass-edge transition-all duration-200 flex flex-col ${
+        isActive
+          ? "border-primary/50 shadow-[0_0_15px_rgba(168,232,255,0.05)]"
+          : checked
+            ? "border-primary/30"
+            : "border-outline-variant/30 opacity-60"
       }`}
     >
-      {/* Header row */}
-      <div className="flex items-center gap-3 mb-1">
+      {/* Main Row */}
+      <div className="flex items-center gap-4 w-full">
         {/* Checkbox */}
         <button
           onClick={onToggleCheck}
           aria-label={checked ? "Deselect file" : "Select file"}
-          className="w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition"
-          style={{
-            borderColor: checked ? "var(--accent-cyan)" : "rgba(255,255,255,0.15)",
-            background: checked ? "var(--accent-cyan)" : "transparent",
-          }}
+          className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition-all duration-200 ${
+            checked
+              ? "bg-[var(--accent-cyan)] border-[var(--accent-cyan)] shadow-[0_0_8px_rgba(0,212,255,0.3)] text-white"
+              : "border-outline-variant bg-surface-container-lowest text-primary"
+          }`}
         >
           {checked && (
             <motion.span
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 400, damping: 15 }}
-              className="text-[10px] text-[var(--bg-deep)] font-bold leading-none"
+              className="text-[12px] text-white font-extrabold leading-none"
             >
               ✓
             </motion.span>
           )}
         </button>
 
-        {/* File index badge */}
-        <span className="font-mono text-xs text-[var(--text-muted)] flex-shrink-0">
+        {/* Index */}
+        <span className="font-technical-sm text-on-surface-variant w-6 text-center flex-shrink-0">
           {String(index + 1).padStart(2, "0")}
         </span>
 
-        {/* Song name / rename input */}
-        <div className="flex-1 min-w-0">
+        {/* Song Details */}
+        <div className="flex-grow min-w-0" onDoubleClick={onDoubleClickName}>
           {isEditing ? (
             <RenameInput
               value={editValue}
@@ -272,141 +275,94 @@ function FileCard({
               onCancel={onRenameCancel}
             />
           ) : (
-            <p
-              className="font-body text-sm font-semibold text-[var(--text-primary)] truncate cursor-pointer hover:text-[var(--accent-cyan)] transition"
-              onDoubleClick={onDoubleClickName}
-              title="Double-click to rename"
-            >
-              {displayName}
-            </p>
-          )}
-        </div>
-
-        {/* Duration + recognized badge */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {file.recognized && (
-            <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-[rgba(34,197,94,0.12)] border border-[rgba(34,197,94,0.25)] text-[var(--success)]">
-              ID&apos;d
-            </span>
-          )}
-          <span className="font-mono text-xs text-[var(--text-muted)]">
-            {formatDuration(file.duration)}
-          </span>
-          {renaming && (
-            <div className="w-3 h-3 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-          )}
-        </div>
-      </div>
-
-      {/* Audio player */}
-      <AudioPlayer
-        url={file.cloudinaryUrl}
-        isActive={isActive}
-        isPlaying={isPlaying}
-        onPlayToggle={onPlayToggle}
-        initialDuration={file.duration}
-      />
-    </motion.div>
-  );
-}
-
-// ─── Sidebar Component ────────────────────────────────────────────────────────
-
-interface SidebarProps {
-  files: JobFile[];
-  displayNames: Record<number, string>;
-  checkedState: Record<number, boolean>;
-  onToggle: (index: number) => void;
-  onSelectAll: () => void;
-  onDeselectAll: () => void;
-  editingIndex: number | null;
-  editValue: string;
-  onEditValueChange: (v: string) => void;
-  onDoubleClickName: (index: number) => void;
-  onRenameCommit: () => void;
-  onRenameCancel: () => void;
-  renamingIndex: number | null;
-}
-
-function PreviewSidebar({
-  files, displayNames, checkedState, onToggle, onSelectAll, onDeselectAll,
-  editingIndex, editValue, onEditValueChange, onDoubleClickName, onRenameCommit,
-  onRenameCancel, renamingIndex,
-}: SidebarProps) {
-  const checkedCount = Object.values(checkedState).filter(Boolean).length;
-
-  return (
-    <div className="flex flex-col h-full font-body text-sm text-[var(--text-secondary)]">
-      <div className="flex items-center justify-between mb-3 px-1">
-        <span className="font-body text-xs text-[var(--text-secondary)]">
-          {checkedCount} of {files.length} selected
-        </span>
-        <div className="flex gap-2">
-          <button onClick={onSelectAll} className="font-body text-[10px] text-[var(--accent-cyan)] hover:underline">All</button>
-          <span className="text-[var(--text-muted)]">·</span>
-          <button onClick={onDeselectAll} className="font-body text-[10px] text-[var(--text-secondary)] hover:underline">None</button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-        {files.map((file, i) => {
-          const name = displayNames[i] ?? buildDisplayName(file, i);
-          const checked = checkedState[i] ?? true;
-          const isEditing = editingIndex === i;
-          const isRenaming = renamingIndex === i;
-
-          return (
-            <div
-              key={i}
-              className={`w-full flex items-center gap-2.5 py-2 px-3 rounded-xl transition ${
-                checked
-                  ? "bg-[rgba(0,212,255,0.06)] border border-[rgba(0,212,255,0.12)]"
-                  : "border border-transparent hover:bg-[rgba(255,255,255,0.03)]"
-              }`}
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggle(i); }}
-                aria-label={checked ? "Deselect file" : "Select file"}
-                className="w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition"
-                style={{
-                  borderColor: checked ? "var(--accent-cyan)" : "rgba(255,255,255,0.15)",
-                  background: checked ? "var(--accent-cyan)" : "transparent",
-                }}
+            <div className="flex flex-col min-w-0">
+              <p
+                className={`font-body-md text-sm font-semibold truncate hover:text-primary cursor-pointer transition ${
+                  isActive ? "text-primary" : "text-on-surface"
+                }`}
+                title="Double-click to rename"
               >
-                {checked && <span className="text-[8px] text-[var(--bg-deep)] font-bold">✓</span>}
-              </button>
-
-              <div
-                className="flex-1 min-w-0"
-                onDoubleClick={(e) => { e.stopPropagation(); onDoubleClickName(i); }}
-              >
-                {isEditing ? (
-                  <RenameInput
-                    value={editValue}
-                    onChange={onEditValueChange}
-                    onCommit={onRenameCommit}
-                    onCancel={onRenameCancel}
-                  />
-                ) : (
-                  <span
-                    className={`font-body text-xs truncate cursor-pointer hover:text-[var(--accent-cyan)] transition block ${
-                      checked ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"
-                    }`}
-                    title="Double-click to rename"
-                  >
-                    {name}
+                {displayName}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {file.recognized && (
+                  <span className="bg-tertiary/10 border border-tertiary/30 text-tertiary font-technical-xs text-[10px] px-1.5 py-0.5 rounded-full">
+                    ID&apos;d
                   </span>
                 )}
+                {renaming && (
+                  <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                )}
               </div>
-
-              {isRenaming && (
-                <div className="w-3 h-3 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              )}
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        {/* Decorative wave bars */}
+        <WaveformBars isPlaying={isActive && isPlaying} />
+
+        {/* Duration */}
+        <span className="font-technical-sm text-on-surface-variant w-12 text-right flex-shrink-0">
+          {formatDuration(file.duration)}
+        </span>
+
+        {/* Play/Pause Button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlayToggle();
+          }}
+          aria-label={isPlaying && isActive ? "Pause" : "Play"}
+          className={`w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition flex-shrink-0 relative ${
+            isActive && isPlaying
+              ? "bg-primary text-[#000] shadow-[0_0_10px_rgba(168,232,255,0.5)]"
+              : "bg-surface-variant text-on-surface hover:bg-surface-bright"
+          }`}
+        >
+          {isActive && isPlaying ? (
+            <>
+              {/* Pulse Ring animation when playing */}
+              <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping pointer-events-none" />
+              <span className="material-symbols-outlined text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>pause</span>
+            </>
+          ) : (
+            <span className="material-symbols-outlined text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>play_arrow</span>
+          )}
+        </button>
+
+        {/* Individual Download */}
+        <a
+          href={file.cloudinaryUrl}
+          download={`${displayName}.mp3`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-primary/10 transition flex-shrink-0"
+        >
+          <span className="material-symbols-outlined text-[20px]">download</span>
+        </a>
       </div>
-    </div>
+
+      {/* Expanded Audio Player */}
+      <AnimatePresence>
+        {isActive && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="w-full mt-3 pt-3 border-t border-outline-variant/30"
+          >
+            <AudioPlayer
+              url={file.cloudinaryUrl}
+              isActive={isActive}
+              isPlaying={isPlaying}
+              onPlayToggle={onPlayToggle}
+              initialDuration={file.duration}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
@@ -418,10 +374,11 @@ interface DownloadPanelProps {
   uncheckedFiles: JobFile[];
   onGoToEditor: () => void;
   onClose: () => void;
+  defaultFormat?: "zip" | "individual";
 }
 
-function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEditor, onClose }: DownloadPanelProps) {
-  const [downloadFormat, setDownloadFormat] = useState<"zip" | "individual">("zip");
+function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEditor, onClose, defaultFormat = "zip" }: DownloadPanelProps) {
+  const [downloadFormat, setDownloadFormat] = useState<"zip" | "individual">(defaultFormat);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState("");
 
@@ -464,7 +421,7 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
       }
 
       setIsDownloading(false);
-      
+
       // If there are unselected files, send user to Audio Editor
       if (uncheckedFiles.length > 0) {
         onGoToEditor();
@@ -492,18 +449,21 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 60, opacity: 0 }}
           transition={{ type: "spring", stiffness: 300, damping: 25 }}
-          className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-6 w-full max-w-md shadow-2xl overflow-y-auto"
+          className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-6 w-full max-w-md shadow-2xl backdrop-blur-xl"
         >
+          {/* Inner edge lighting border */}
+          <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none z-20" />
+
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-heading text-lg font-bold text-[var(--text-primary)]">Continue to Editor</h3>
-            <button onClick={onClose} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">✕</button>
+            <h3 className="font-display-lg text-lg font-bold text-on-surface">Continue to Editor</h3>
+            <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface text-xl">✕</button>
           </div>
-          <p className="font-body text-sm text-[var(--text-secondary)] mb-6 leading-relaxed">
+          <p className="font-body-md text-sm text-on-surface-variant mb-6 leading-relaxed">
             You have deselected all songs. They will all be sent to the Audio Editor for manual slicing.
           </p>
           <button
             onClick={onGoToEditor}
-            className="w-full py-3 font-body text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:scale-[1.02] active:scale-[0.98] transition transform"
+            className="w-full py-3.5 font-body-md text-sm font-semibold bg-gradient-to-r from-secondary to-primary text-[#000] rounded-full hover:scale-[1.02] active:scale-[0.98] transition transform"
           >
             ✏️ Go to Audio Editor
           </button>
@@ -525,28 +485,31 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 60, opacity: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
-        className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[85vh] overflow-y-auto"
+        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-6 w-full max-w-lg shadow-2xl backdrop-blur-xl max-h-[85vh] overflow-y-auto"
       >
+        {/* Inner edge lighting border */}
+        <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none z-20" />
+
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-heading text-lg font-bold text-[var(--text-primary)]">Download &amp; Continue</h3>
-          <button onClick={onClose} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xl">✕</button>
+          <h3 className="font-display-lg text-lg font-bold text-on-surface">Download &amp; Continue</h3>
+          <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface text-xl">✕</button>
         </div>
 
         {/* Dynamic Division Info Panel */}
-        <div className="mb-5 p-4 rounded-xl bg-[rgba(0,212,255,0.04)] border border-[rgba(0,212,255,0.1)] flex flex-col gap-2">
+        <div className="mb-5 p-4 rounded-xl bg-primary/5 border border-primary/20 flex flex-col gap-2">
           <div className="flex justify-between items-center text-xs">
-            <span className="text-[var(--text-secondary)]">🎵 Selected for download:</span>
-            <span className="font-semibold text-[var(--accent-cyan)]">{checkedFiles.length} song{checkedFiles.length > 1 ? "s" : ""}</span>
+            <span className="text-on-surface-variant">🎵 Selected for download:</span>
+            <span className="font-semibold text-primary">{checkedFiles.length} song{checkedFiles.length > 1 ? "s" : ""}</span>
           </div>
           {uncheckedFiles.length > 0 && (
             <div className="flex justify-between items-center text-xs">
-              <span className="text-[var(--text-secondary)]">✏️ Taking to Audio Editor:</span>
-              <span className="font-semibold text-[var(--accent-orange)]">{uncheckedFiles.length} song{uncheckedFiles.length > 1 ? "s" : ""}</span>
+              <span className="text-on-surface-variant">✏] Slicing manually in editor:</span>
+              <span className="font-semibold text-secondary">{uncheckedFiles.length} song{uncheckedFiles.length > 1 ? "s" : ""}</span>
             </div>
           )}
         </div>
 
-        <p className="font-body text-xs text-[var(--text-secondary)] mb-3">
+        <p className="font-body-md text-xs text-on-surface-variant mb-3">
           Choose how you would like to download your selected songs:
         </p>
 
@@ -556,19 +519,19 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
             onClick={() => !isDownloading && setDownloadFormat("zip")}
             className={`cursor-pointer p-4 rounded-xl border-2 transition duration-200 ${
               downloadFormat === "zip"
-                ? "border-[var(--accent-cyan)] bg-[rgba(0,212,255,0.06)]"
-                : "border-[var(--glass-border)] bg-[var(--glass-bg)] hover:bg-[rgba(255,255,255,0.02)]"
+                ? "border-primary bg-primary/5"
+                : "border-outline-variant bg-surface-container-lowest/80 hover:bg-surface-container-low"
             } ${isDownloading ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <div className="flex items-start gap-3">
               <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5"
-                style={{ borderColor: downloadFormat === "zip" ? "var(--accent-cyan)" : "rgba(255,255,255,0.3)" }}
+                style={{ borderColor: downloadFormat === "zip" ? "var(--primary-container)" : "rgba(255,255,255,0.3)" }}
               >
-                {downloadFormat === "zip" && <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent-cyan)]" />}
+                {downloadFormat === "zip" && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
               </div>
               <div className="flex-1">
-                <p className="font-heading text-sm font-semibold text-[var(--text-primary)]">Single ZIP Archive (.zip)</p>
-                <p className="font-body text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                <p className="font-display-lg text-sm font-semibold text-on-surface">Single ZIP Archive (.zip)</p>
+                <p className="font-body-md text-xs text-on-surface-variant mt-0.5 leading-relaxed">
                   Downloads all selected tracks packaged into one single zipped folder. Highly recommended for desktops.
                 </p>
               </div>
@@ -579,19 +542,19 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
             onClick={() => !isDownloading && setDownloadFormat("individual")}
             className={`cursor-pointer p-4 rounded-xl border-2 transition duration-200 ${
               downloadFormat === "individual"
-                ? "border-[var(--accent-cyan)] bg-[rgba(0,212,255,0.06)]"
-                : "border-[var(--glass-border)] bg-[var(--glass-bg)] hover:bg-[rgba(255,255,255,0.02)]"
+                ? "border-primary bg-primary/5"
+                : "border-outline-variant bg-surface-container-lowest/80 hover:bg-surface-container-low"
             } ${isDownloading ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <div className="flex items-start gap-3">
               <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5"
-                style={{ borderColor: downloadFormat === "individual" ? "var(--accent-cyan)" : "rgba(255,255,255,0.3)" }}
+                style={{ borderColor: downloadFormat === "individual" ? "var(--primary-container)" : "rgba(255,255,255,0.3)" }}
               >
-                {downloadFormat === "individual" && <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent-cyan)]" />}
+                {downloadFormat === "individual" && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
               </div>
               <div className="flex-1">
-                <p className="font-heading text-sm font-semibold text-[var(--text-primary)]">Individual MP3 Files (.mp3)</p>
-                <p className="font-body text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                <p className="font-display-lg text-sm font-semibold text-on-surface">Individual MP3 Files (.mp3)</p>
+                <p className="font-body-md text-xs text-on-surface-variant mt-0.5 leading-relaxed">
                   Downloads each track as a separate file sequentially. Recommended for mobile devices.
                 </p>
               </div>
@@ -600,21 +563,21 @@ function DownloadPanel({ checkedFiles, checkedNames, uncheckedFiles, onGoToEdito
         </div>
 
         {isDownloading ? (
-          <div className="flex flex-col items-center justify-center py-6 gap-3 border border-[var(--glass-border)] bg-[var(--glass-bg)] rounded-xl">
-            <div className="w-8 h-8 border-3 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-            <p className="font-body text-sm text-[var(--accent-cyan)] animate-pulse">{downloadProgress}</p>
+          <div className="flex flex-col items-center justify-center py-6 gap-3 border border-outline-variant bg-surface-container-low rounded-xl">
+            <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+            <p className="font-body-md text-sm text-primary animate-pulse">{downloadProgress}</p>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
             <button
               onClick={handleDownloadAndContinue}
-              className="w-full py-3.5 font-body text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:scale-[1.01] active:scale-[0.99] transition transform shadow-[0_0_20px_rgba(0,212,255,0.15)] flex items-center justify-center gap-2"
+              className="w-full py-3.5 font-body-md text-sm font-semibold bg-gradient-to-r from-secondary to-primary text-[#000] rounded-full hover:scale-[1.01] active:scale-[0.99] transition transform shadow-[0_0_20px_rgba(0,212,255,0.15)] flex items-center justify-center gap-2"
             >
               📥 Download &amp; Continue
             </button>
             <button
               onClick={onClose}
-              className="w-full py-2 font-body text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-primary)] transition"
+              className="w-full py-2 font-body-md text-xs font-semibold text-on-surface-variant hover:text-on-surface transition"
             >
               Cancel
             </button>
@@ -644,18 +607,21 @@ function PreviewWarningModal({ onConfirm }: { onConfirm: () => void }) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 20 }}
-        className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-8 max-w-md w-full shadow-2xl"
+        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl"
       >
-        <div className="text-4xl mb-4">📢</div>
-        <h3 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-3">
+        <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none" />
+        <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4">
+          <span className="material-symbols-outlined text-[28px]">notification_important</span>
+        </div>
+        <h3 className="font-display-lg text-[20px] font-bold text-on-surface mb-3">
           AI Cuts & Review Guide
         </h3>
-        <p className="font-body text-sm text-[var(--text-secondary)] leading-relaxed mb-6">
-          The AI is not perfect. Some cuts may be incorrect. Listen to all files, select the correct ones, click Continue. The rest go to the Audio Editor.
+        <p className="font-body-md text-sm text-on-surface-variant leading-relaxed mb-6">
+          The AI is not perfect. Some cuts may be incorrect. Listen to all files, select the correct ones, and click Continue. The rest will go to the Audio Editor.
         </p>
         <button
           onClick={onConfirm}
-          className="w-full py-3 font-body text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:shadow-[0_0_15px_rgba(0,212,255,0.25)] hover:scale-[1.02] active:scale-[0.98] transition transform"
+          className="w-full py-3 font-body-md text-sm font-semibold bg-secondary-container hover:bg-[#5235e8] text-on-surface rounded-full border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
         >
           Got it, show me
         </button>
@@ -671,7 +637,7 @@ function GeneratorPreviewContent() {
   const searchParams = useSearchParams();
   const queryJobId = searchParams.get("jobId");
 
-  const { jobId: contextJobId, setEditorFiles } = useGeneratorContext();
+  const { jobId: contextJobId, setEditorFiles, selectedFile } = useGeneratorContext();
   const activeJobId = queryJobId || contextJobId;
 
   const [job, setJob] = useState<JobData | null>(null);
@@ -686,6 +652,7 @@ function GeneratorPreviewContent() {
   const [showWarningModal, setShowWarningModal] = useState(true);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"zip" | "individual">("zip");
 
   // Load job from API
   useEffect(() => {
@@ -693,6 +660,8 @@ function GeneratorPreviewContent() {
       router.push("/generator/upload");
       return;
     }
+    localStorage.setItem("active_route", `/generator/preview?jobId=${activeJobId}`);
+    localStorage.setItem("active_generator_route", `/generator/preview?jobId=${activeJobId}`);
     const fetchJob = async () => {
       setLoading(true);
       const result = await getJob(activeJobId);
@@ -781,6 +750,7 @@ function GeneratorPreviewContent() {
 
   const handleContinue = () => {
     if (!job) return;
+    setDownloadFormat("zip");
     setShowDownload(true);
   };
 
@@ -795,34 +765,30 @@ function GeneratorPreviewContent() {
     router.push("/generator/editor");
   };
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col">
         <Navbar />
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-grow flex items-center justify-center">
           <div className="flex flex-col items-center gap-4">
-            <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-            <p className="font-body text-sm text-[var(--text-secondary)] animate-pulse">Loading your songs...</p>
+            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            <p className="font-body-md text-sm text-on-surface-variant animate-pulse font-semibold">Loading your songs...</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── Error ─────────────────────────────────────────────────────────────────────
-
   if (error || !job) {
     return (
-      <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col">
         <Navbar />
-        <div className="flex-1 flex items-center justify-center px-4">
+        <div className="flex-grow flex items-center justify-center px-4">
           <div className="text-center max-w-sm">
             <p className="text-4xl mb-4">❌</p>
-            <h2 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-2">Failed to Load Songs</h2>
-            <p className="font-body text-sm text-[var(--text-secondary)] mb-6">{error ?? "Something went wrong on the server. Please try again."}</p>
-            <button onClick={() => router.push("/generator/upload")} className="font-body text-sm py-2.5 px-6 border border-[rgba(0,212,255,0.3)] text-[var(--accent-cyan)] rounded-xl hover:bg-[rgba(0,212,255,0.08)] transition">
+            <h2 className="font-display-lg text-xl font-bold text-on-surface mb-2">Failed to Load Songs</h2>
+            <p className="font-body-md text-sm text-on-surface-variant mb-6">{error ?? "Something went wrong on the server. Please try again."}</p>
+            <button onClick={() => router.push("/generator/upload")} className="font-body-md text-sm py-2.5 px-6 border border-primary/30 text-primary rounded-xl hover:bg-primary/10 transition">
               Back to Upload
             </button>
           </div>
@@ -836,124 +802,166 @@ function GeneratorPreviewContent() {
   const uncheckedFiles = files.filter((_, i) => !checkedState[i]);
   const checkedNames = checkedFiles.map((f) => displayNames[files.indexOf(f)] ?? buildDisplayName(f, files.indexOf(f)));
 
-  // ── Empty state ────────────────-----------------------------------------------
-
   if (files.length === 0) {
     return (
-      <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col">
         <Navbar />
-        <div className="flex-1 flex items-center justify-center px-4">
-          <p className="font-body text-sm text-[var(--text-secondary)]">No songs were automatically named. You can rename them by double-clicking.</p>
+        <div className="flex-grow flex items-center justify-center px-4">
+          <p className="font-body-md text-sm text-on-surface-variant">No songs were automatically named. You can rename them by double-clicking.</p>
         </div>
       </div>
     );
   }
 
-  // ── Success ────────────────────────────────-----------------------------------
+  const checkedCount = Object.values(checkedState).filter(Boolean).length;
 
   return (
-    <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-[#0f0f0f] text-on-background flex flex-col font-body-md antialiased relative">
       <Navbar />
 
-      <div className="flex-1 flex overflow-hidden max-h-[calc(100vh-64px)]">
-        {/* Sidebar */}
-        <aside className="hidden md:flex flex-col w-64 border-r border-[var(--glass-border)] bg-[var(--bg-surface)] p-4 overflow-hidden">
-          <h2 className="font-heading text-sm font-bold text-[var(--text-primary)] mb-3 tracking-wide">
-            Songs ({files.length})
-          </h2>
-          <PreviewSidebar
-            files={files}
-            displayNames={displayNames}
-            checkedState={checkedState}
-            onToggle={handleToggle}
-            onSelectAll={handleSelectAll}
-            onDeselectAll={handleDeselectAll}
-            editingIndex={editingIndex}
-            editValue={editValue}
-            onEditValueChange={setEditValue}
-            onDoubleClickName={startEdit}
-            onRenameCommit={commitRename}
-            onRenameCancel={cancelRename}
-            renamingIndex={renamingIndex}
-          />
-        </aside>
-
-        {/* Main content */}
-        <main className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="max-w-2xl mx-auto">
-            {/* Mobile song count */}
-            <div className="md:hidden flex items-center justify-between mb-4">
-              <h1 className="font-heading text-lg font-bold text-[var(--text-primary)]">
-                Preview Songs
-              </h1>
-              <span className="font-body text-xs text-[var(--text-secondary)]">
-                {Object.values(checkedState).filter(Boolean).length} / {files.length} selected
-              </span>
+      <main className="flex-grow pt-24 pb-12 px-6 max-w-[1440px] mx-auto w-full z-10">
+        
+        {/* Header Title & Metadata */}
+        <div className="mb-6">
+          <h1 className="font-display-lg text-display-lg text-on-surface tracking-tight">
+            Generated Tracks Preview
+          </h1>
+          
+          <div className="font-technical-sm text-technical-sm text-on-surface-variant flex flex-wrap items-center gap-6 mt-3">
+            <div className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px]">folder_open</span>
+              <span>{selectedFile?.name || "Mixtape Project"}</span>
             </div>
-
-            <p className="font-body text-xs text-[var(--text-muted)] mb-5 hidden md:block">
-              Double-click a song name to rename it. Uncheck any incorrect cuts — they&apos;ll go to the Audio Editor.
-            </p>
-
-            {/* File cards */}
-            <div className="space-y-4">
-              {files.map((file, i) => (
-                <FileCard
-                  key={i}
-                  file={file}
-                  index={i}
-                  displayName={displayNames[i] ?? buildDisplayName(file, i)}
-                  checked={checkedState[i] ?? true}
-                  isEditing={editingIndex === i}
-                  editValue={editValue}
-                  onEditValueChange={setEditValue}
-                  onDoubleClickName={() => startEdit(i)}
-                  onRenameCommit={commitRename}
-                  onRenameCancel={cancelRename}
-                  onToggleCheck={() => handleToggle(i)}
-                  renaming={renamingIndex === i}
-                  isActive={activeIndex === i}
-                  isPlaying={activeIndex === i && isPlaying}
-                  onPlayToggle={() => {
-                    if (activeIndex === i) {
-                      setIsPlaying(!isPlaying);
-                    } else {
-                      setActiveIndex(i);
-                      setIsPlaying(true);
-                    }
-                  }}
-                />
-              ))}
+            <div className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px]">memory</span>
+              <span>Gemini 2.5 Flash</span>
             </div>
-
-            {/* Button Container */}
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: files.length * 0.05 + 0.2 }}
-              className="mt-8 flex flex-col sm:flex-row gap-4 w-full"
-            >
-              <button
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    sessionStorage.removeItem(`checked_state_${activeJobId}`);
-                  }
-                  router.push("/generator/upload");
-                }}
-                className="flex-1 py-4 font-body text-base font-semibold border border-[rgba(239,68,68,0.3)] text-[var(--error)] bg-[rgba(239,68,68,0.05)] rounded-xl hover:bg-[rgba(239,68,68,0.12)] transition duration-200"
-              >
-                ✕ Cancel &amp; Discard Project
-              </button>
-              <button
-                onClick={handleContinue}
-                className="flex-1 py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200"
-              >
-                Continue →
-              </button>
-            </motion.div>
+            <div className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px]">queue_music</span>
+              <span>{files.length} Tracks</span>
+            </div>
           </div>
-        </main>
-      </div>
+        </div>
+
+        {/* Sticky Action Bar */}
+        <div className="sticky top-[80px] z-40 bg-surface-container-high/80 backdrop-blur-xl border border-white/5 glass-edge rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xl">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleSelectAll}
+              className="font-technical-sm text-technical-sm text-primary hover:underline font-semibold"
+            >
+              Select All
+            </button>
+            <span className="text-outline-variant">|</span>
+            <button
+              onClick={handleDeselectAll}
+              className="font-technical-sm text-technical-sm text-on-surface-variant hover:underline font-semibold"
+            >
+              Deselect All
+            </button>
+            <div className="flex items-center gap-1.5 bg-surface-container-highest rounded-full px-3 py-1 font-technical-xs text-technical-xs text-on-surface">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span>{checkedCount} of {files.length} selected</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  sessionStorage.removeItem(`checked_state_${activeJobId}`);
+                }
+                localStorage.removeItem("active_split_job");
+                localStorage.removeItem("active_route");
+                localStorage.removeItem("active_generator_route");
+                router.push("/generator/upload");
+              }}
+              className="border border-red-800/40 hover:bg-red-900/90 text-red-200 bg-red-950/70 font-technical-sm text-technical-sm rounded-full px-4 py-2 transition duration-200 flex items-center gap-1.5 shadow-[0_0_10px_rgba(239,68,68,0.1)]"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+              Exit to Upload
+            </button>
+            <button
+              onClick={handleContinue}
+              className="border border-primary text-primary hover:bg-primary/10 font-technical-sm text-technical-sm rounded-full px-4 py-2 glass-edge transition duration-200 flex items-center gap-1.5 font-semibold"
+            >
+              <span className="material-symbols-outlined text-[18px]">checklist</span>
+              Download Selected
+            </button>
+            <button
+              onClick={() => {
+                handleSelectAll();
+                setDownloadFormat("zip");
+                setShowDownload(true);
+              }}
+              className="bg-gradient-to-r from-secondary to-primary text-[#000] rounded-full font-bold shadow-[0_0_20px_rgba(168,232,255,0.3)] font-technical-sm text-technical-sm px-4 py-2 flex items-center gap-1.5 transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>archive</span>
+              Download All as ZIP
+            </button>
+          </div>
+        </div>
+
+        {/* Track list grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+          {files.map((file, i) => (
+            <FileCard
+              key={i}
+              file={file}
+              index={i}
+              displayName={displayNames[i] ?? buildDisplayName(file, i)}
+              checked={checkedState[i] ?? true}
+              isEditing={editingIndex === i}
+              editValue={editValue}
+              onEditValueChange={setEditValue}
+              onDoubleClickName={() => startEdit(i)}
+              onRenameCommit={commitRename}
+              onRenameCancel={cancelRename}
+              onToggleCheck={() => handleToggle(i)}
+              renaming={renamingIndex === i}
+              isActive={activeIndex === i}
+              isPlaying={activeIndex === i && isPlaying}
+              onPlayToggle={() => {
+                if (activeIndex === i) {
+                  setIsPlaying(!isPlaying);
+                } else {
+                  setActiveIndex(i);
+                  setIsPlaying(true);
+                }
+              }}
+            />
+          ))}
+        </div>
+
+        {/* Bottom Button Container */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: files.length * 0.05 + 0.2 }}
+          className="mt-8 flex flex-col sm:flex-row gap-4 w-full"
+        >
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                sessionStorage.removeItem(`checked_state_${activeJobId}`);
+              }
+              localStorage.removeItem("active_split_job");
+              localStorage.removeItem("active_route");
+              localStorage.removeItem("active_generator_route");
+              router.push("/generator/upload");
+            }}
+            className="flex-1 py-4 font-body-md text-base font-semibold border border-red-800/40 text-red-200 bg-red-950/70 hover:bg-red-900/90 rounded-xl transition duration-200 shadow-[0_0_15px_rgba(239,68,68,0.15)]"
+          >
+            ✕ Cancel &amp; Discard Project
+          </button>
+          <button
+            onClick={handleContinue}
+            className="flex-1 py-4 font-body-md text-base font-semibold bg-gradient-to-r from-secondary to-primary text-[#000] rounded-xl font-bold shadow-[0_0_20px_rgba(168,232,255,0.3)] transition transform duration-200"
+          >
+            Continue →
+          </button>
+        </motion.div>
+
+      </main>
 
       {/* Warning modal */}
       <AnimatePresence>
@@ -971,6 +979,7 @@ function GeneratorPreviewContent() {
             uncheckedFiles={uncheckedFiles}
             onGoToEditor={handleGoToEditor}
             onClose={() => setShowDownload(false)}
+            defaultFormat={downloadFormat}
           />
         )}
       </AnimatePresence>
@@ -984,9 +993,9 @@ export default function GeneratorPreviewPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col justify-center items-center">
-          <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-          <p className="font-body text-sm text-[var(--text-secondary)] mt-4 animate-pulse">
+        <div className="min-h-screen bg-background flex flex-col justify-center items-center">
+          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="font-body-md text-sm text-on-surface-variant mt-4 animate-pulse">
             Initializing preview parameters...
           </p>
         </div>

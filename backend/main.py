@@ -303,7 +303,9 @@ async def get_job_endpoint(job_id: str, uid: str = Depends(get_current_uid)):
                 "jobId": job_data.get("jobId"),
                 "status": job_data.get("status"),
                 "fileCount": job_data.get("fileCount", 0),
-                "files": job_data.get("files", [])
+                "files": job_data.get("files", []),
+                "errorType": job_data.get("errorType"),
+                "errorMessage": job_data.get("errorMessage")
             }
         }
     except HTTPException:
@@ -555,6 +557,7 @@ async def process_audio(
 
     async def event_stream():
         try:
+            yield f"data: {json.dumps({'step': 'init', 'jobId': job_id})}\n\n"
             final_files = None
             async for event in run_pipeline(
                 audio_path=audio_path,
@@ -602,11 +605,13 @@ async def process_audio(
 
                 elif step == "error":
                     error_type = event.get("error_type", "general")
+                    error_message = event.get("message")
                     try:
                         db = get_active_db()
                         db.collection("jobs").document(job_id).update({
                             "status": "failed",
                             "errorType": error_type,
+                            "errorMessage": error_message,
                         })
                         increment_write_count(1)
                     except Exception:

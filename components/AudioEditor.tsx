@@ -6,6 +6,12 @@ import React, {
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import { audioBufferToWav, sliceAudioBuffer, formatSec } from "@/lib/audioUtils";
+import {
+  saveEditorSession,
+  saveEditorSegments,
+  loadEditorSession,
+  clearEditorSession,
+} from "@/lib/editorStorage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +25,8 @@ interface Segment {
 export interface AudioEditorProps {
   initialFileUrl?: string;
   initialFileName?: string;
+  initialFileUrls?: string[];
+  initialFileNames?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,11 +162,19 @@ function ToolbarBtn({
 function SegmentItem({
   segment, index, selected, isEditing, editValue, onSelect,
   onDoubleClick, onEditChange, onEditCommit, onEditCancel, onDownload,
+  draggable, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd, onDragLeave,
 }: {
   segment: Segment; index: number; selected: boolean; isEditing: boolean;
   editValue: string; onSelect: (e: React.MouseEvent) => void; onDoubleClick: () => void;
   onEditChange: (v: string) => void; onEditCommit: () => void; onEditCancel: () => void;
   onDownload: () => void;
+  draggable: boolean;
+  isDragOver: boolean;
+  onDragStart: (index: number) => void;
+  onDragOver: (e: React.DragEvent, index: number) => void;
+  onDrop: (e: React.DragEvent, index: number) => void;
+  onDragEnd: () => void;
+  onDragLeave: () => void;
 }) {
   const editRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (isEditing) { editRef.current?.focus(); editRef.current?.select(); } }, [isEditing]);
@@ -170,10 +186,18 @@ function SegmentItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.04 }}
       onClick={onSelect}
+      draggable={draggable && !isEditing}
+      onDragStart={() => onDragStart(index)}
+      onDragOver={(e) => onDragOver(e, index)}
+      onDrop={(e) => onDrop(e, index)}
+      onDragEnd={onDragEnd}
+      onDragLeave={onDragLeave}
       className={`group flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition
         ${selected
           ? "bg-[rgba(0,212,255,0.08)] border-[rgba(0,212,255,0.25)]"
-          : "border-transparent hover:bg-[rgba(255,255,255,0.03)] hover:border-[var(--glass-border)]"}`}
+          : "border-transparent hover:bg-[rgba(255,255,255,0.03)] hover:border-[var(--glass-border)]"}
+        ${draggable && !isEditing ? "cursor-grab active:cursor-grabbing" : ""}
+        ${isDragOver ? "border-t-2 border-t-[var(--accent-cyan)]" : ""}`}
     >
       <div className="w-1 self-stretch rounded-full flex-shrink-0"
         style={{ background: selected ? "var(--accent-cyan)" : "var(--glass-border)" }} />
@@ -260,7 +284,12 @@ function EditorDropZone({ dragOver, onDragOver, onDragLeave, onDrop, onClick }: 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProps) {
+export function AudioEditor({
+  initialFileUrl,
+  initialFileName,
+  initialFileUrls,
+  initialFileNames,
+}: AudioEditorProps) {
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [duration, setDuration] = useState(0);
@@ -282,6 +311,51 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   const [waveVersion, setWaveVersion] = useState(0);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [blockedActionMsg, setBlockedActionMsg] = useState<string | null>(null);
+  const [isPortraitMobile, setIsPortraitMobile] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  // Orientation Check Hook
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const checkOrientation = () => {
+      const isSmall = window.innerWidth < 768;
+      const isPortrait = window.innerHeight > window.innerWidth;
+      setIsPortraitMobile(isSmall && isPortrait);
+    };
+
+    checkOrientation();
+    window.addEventListener("resize", checkOrientation);
+    window.addEventListener("orientationchange", checkOrientation);
+
+    return () => {
+      window.removeEventListener("resize", checkOrientation);
+      window.removeEventListener("orientationchange", checkOrientation);
+    };
+  }, []);
+
+  // Screen Wake Lock API to prevent phone screen from turning off during editing
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          wakeLock = await (navigator as any).wakeLock.request("screen");
+        }
+      } catch (err) {
+        console.warn("Screen wake lock request failed:", err);
+      }
+    };
+    requestWakeLock();
+    return () => {
+      if (wakeLock) {
+        wakeLock.release().catch(() => {});
+      }
+    };
+  }, []);
 
   // Manage beginner tooltip sequence transitions
   useEffect(() => {
@@ -328,26 +402,35 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     setCursorTime(targetTime);
   }, [duration]);
 
-  // ── Load initial URL (from generator/editor) ─────────────────────────────────
+  // ── Load initial URL(s) (from generator/editor) ───────────────────────────────
 
   useEffect(() => {
-    if (!initialFileUrl) return;
+    const urls = initialFileUrls || (initialFileUrl ? [initialFileUrl] : []);
+    const names = initialFileNames || (initialFileName ? [initialFileName] : []);
+    if (urls.length === 0) return;
+
     const run = async () => {
       setLoading(true);
-      setLoadingMsg("Fetching audio from server…");
+      setLoadingMsg("Fetching audio files from server…");
       try {
-        const blob = await fetch(initialFileUrl).then((r) => r.blob());
-        const file = new File([blob], initialFileName ?? "track.mp3", { type: blob.type || "audio/mpeg" });
-        await loadFiles([file]);
-        // Don't setLoading(false) here — WaveSurfer "ready" event will handle it
-      } catch {
-        setErrorMsg("Failed to load audio from the server.");
+        const fetchedFiles: File[] = [];
+        for (let i = 0; i < urls.length; i++) {
+          setLoadingMsg(`Fetching audio file ${i + 1} of ${urls.length}…`);
+          const blob = await fetch(urls[i]).then((r) => r.blob());
+          const name = names[i] || `track_${i + 1}.mp3`;
+          const file = new File([blob], name, { type: blob.type || "audio/mpeg" });
+          fetchedFiles.push(file);
+        }
+        await loadFiles(fetchedFiles);
+      } catch (err) {
+        console.error("Failed to load audio files from server:", err);
+        setErrorMsg("Failed to load audio files from the server.");
         setLoading(false);
       }
     };
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialFileUrl]);
+  }, [initialFileUrl, initialFileUrls]);
 
   // ── Decode and initialise ─────────────────────────────────────────────────────
 
@@ -420,7 +503,10 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
         setSegments(finalSegments);
         setAudioFile(files[0]);
         setWaveVersion((v) => v + 1);
-        // Don't set loading=false here — let WaveSurfer "ready" event do it
+        if (!initialFileUrl && !initialFileUrls) {
+          saveEditorSession(files[0], files[0].name, finalSegments);
+        }
+        // Don't setLoading(false) here — let WaveSurfer "ready" event do it
         return;
       }
       
@@ -443,6 +529,9 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       setSegments(finalSegments);
       setAudioFile(mergedFile);
       setWaveVersion((v) => v + 1);
+      if (!initialFileUrl && !initialFileUrls) {
+        saveEditorSession(mergedFile, mergedFile.name, finalSegments);
+      }
       // Don't set loading=false here — WaveSurfer "ready" event will do it
       return;
     } catch (err) {
@@ -450,13 +539,44 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       setErrorMsg("Failed to decode one or more audio files. Please ensure they are valid audio files.");
       setLoading(false);
     }
-  }, []);
+  }, [initialFileUrl, initialFileUrls]);
 
-  // Save segments to sessionStorage when they change
+  // ── Restore saved standalone session from IndexedDB ─────────────────────────
+
+  useEffect(() => {
+    if (initialFileUrl || initialFileUrls) return;
+    const restoreSession = async () => {
+      try {
+        const session = await loadEditorSession();
+        if (session) {
+          setLoading(true);
+          setLoadingMsg("Restoring your previous session…");
+          const { file, fileName, segments: restoredSegments } = session;
+          
+          // Re-establish session keys in sessionStorage & stable key ref
+          const storageKey = `editor_segments_${fileName}`;
+          stableStorageKeyRef.current = storageKey;
+          sessionStorage.setItem(storageKey, JSON.stringify(restoredSegments));
+          
+          const fileObj = file instanceof File ? file : new File([file], fileName, { type: file.type || "audio/mpeg" });
+          await loadFiles([fileObj]);
+        }
+      } catch (err) {
+        console.error("Failed to restore session from IndexedDB:", err);
+      }
+    };
+    restoreSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFileUrl, initialFileUrls, loadFiles]);
+
+  // Save segments to sessionStorage and IndexedDB when they change
   useEffect(() => {
     if (!stableStorageKeyRef.current || segments.length === 0) return;
     sessionStorage.setItem(stableStorageKeyRef.current, JSON.stringify(segments));
-  }, [segments]);
+    if (!initialFileUrl && !initialFileUrls) {
+      saveEditorSegments(segments);
+    }
+  }, [segments, initialFileUrl, initialFileUrls]);
 
   // ── WaveSurfer ────────────────────────────────────────────────────────────────
   // Recreates whenever audioFile changes (waveVersion forces recreation)
@@ -672,13 +792,16 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       setAudioFile(newFile);
       setWaveVersion((v) => v + 1);
       setErrorMsg(null);
+      if (!initialFileUrl && !initialFileUrls) {
+        saveEditorSession(newFile, newFile.name, newSegments);
+      }
       // Loading overlay stays until WaveSurfer "ready" fires
     } catch (err) {
       console.error("Merge error:", err);
       setErrorMsg("Failed to merge segments. Please try again.");
       setLoading(false);
     }
-  }, [selectedIds, segments, pushUndo, audioBuffer]);
+  }, [selectedIds, segments, pushUndo, audioBuffer, initialFileUrl, initialFileUrls]);
 
   // ── Undo ──────────────────────────────────────────────────────────────────────
 
@@ -688,6 +811,90 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
     setUndoStack((p) => p.slice(0, -1));
     setSelectedIds(new Set());
   }, [undoStack]);
+
+  // ── Drag & Drop Reordering ───────────────────────────────────────────────────
+
+  const handleReorder = useCallback(async (dragIndex: number, hoverIndex: number) => {
+    if (dragIndex === hoverIndex) return;
+    if (!audioBuffer || !audioCtxRef.current) return;
+
+    pushUndo();
+    setLoading(true);
+    setLoadingMsg("Reordering segments…");
+
+    try {
+      const ctx = audioCtxRef.current;
+      const nextSegs = [...segments];
+      const [draggedItem] = nextSegs.splice(dragIndex, 1);
+      nextSegs.splice(hoverIndex, 0, draggedItem);
+
+      const audioClips: AudioBuffer[] = [];
+      const updatedSegs: Segment[] = [];
+      let runningTime = 0;
+
+      for (const seg of nextSegs) {
+        const slice = sliceAudioBuffer(ctx, audioBuffer, seg.startSec, seg.endSec);
+        audioClips.push(slice);
+        
+        const dur = seg.endSec - seg.startSec;
+        updatedSegs.push({
+          id: seg.id,
+          name: seg.name,
+          startSec: runningTime,
+          endSec: runningTime + dur,
+        });
+        runningTime += dur;
+      }
+
+      const newBuffer = concatenateAudioBuffers(ctx, audioClips);
+
+      setLoadingMsg("Rebuilding waveform…");
+      await new Promise((r) => setTimeout(r, 50));
+      const wavBlob = bufferToWavBlob(newBuffer);
+      const newFile = new File([wavBlob], "reordered_audio.wav", { type: "audio/wav" });
+
+      setAudioBuffer(newBuffer);
+      setDuration(newBuffer.duration);
+      setSegments(updatedSegs);
+      setAudioFile(newFile);
+      setWaveVersion((v) => v + 1);
+      setErrorMsg(null);
+      
+      if (!initialFileUrl && !initialFileUrls) {
+        saveEditorSession(newFile, newFile.name, updatedSegs);
+      }
+    } catch (err) {
+      console.error("Reorder error:", err);
+      setErrorMsg("Failed to reorder segments. Please try again.");
+      setLoading(false);
+    }
+  }, [segments, audioBuffer, pushUndo, initialFileUrl, initialFileUrls]);
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleSegmentDrop = async (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+    await handleReorder(draggedIndex, targetIndex);
+    setDraggedIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
 
   const handlePlayPause = () => {
     if (!wavesurferRef.current) return;
@@ -839,11 +1046,15 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
       );
 
       // Update all state
+      const nextSegs = [...segments, ...newSegs];
       setAudioBuffer(merged);
       setDuration(runningEnd);
-      setSegments((prev) => [...prev, ...newSegs]);
+      setSegments(nextSegs);
       setAudioFile(newFile);
       setWaveVersion((v) => v + 1);
+      if (!initialFileUrl && !initialFileUrls) {
+        saveEditorSession(newFile, newFile.name, nextSegs);
+      }
       // Loading overlay stays until WaveSurfer fires "ready"
     } catch (err) {
       console.error("Add file error:", err);
@@ -887,7 +1098,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
   return (
     <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] flex flex-col">
       <Navbar />
-      <div className="flex-1 flex overflow-hidden relative" style={{ maxHeight: "calc(100vh - 64px)" }}>
+      <div className={`flex-1 flex overflow-hidden relative ${isPortraitMobile ? "blur-md select-none pointer-events-none" : ""}`} style={{ maxHeight: "calc(100vh - 64px)" }}>
         {loading && (
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center flex-col gap-4">
             <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
@@ -912,7 +1123,14 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
                   isEditing={editingId === seg.id} editValue={editValue}
                   onSelect={(e) => toggleSelect(seg.id, e)} onDoubleClick={() => startEdit(seg.id)}
                   onEditChange={setEditValue} onEditCommit={commitEdit} onEditCancel={() => setEditingId(null)}
-                  onDownload={() => downloadSegment(seg)} />
+                  onDownload={() => downloadSegment(seg)}
+                  draggable={true}
+                  isDragOver={dragOverIndex === i}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleSegmentDrop}
+                  onDragEnd={handleDragEnd}
+                  onDragLeave={handleDragLeave} />
                 {i === 0 && tooltipStep === 3 && (
                   <AnimatePresence>
                     <motion.div
@@ -1151,6 +1369,7 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
               setWaveReady(false);
               setUndoStack([]);
               setSelectedIds(new Set());
+              clearEditorSession();
             }}
               className="font-body text-xs text-[var(--text-muted)] hover:text-[var(--error)] px-3 py-1.5 border border-[var(--glass-border)] rounded-lg hover:bg-[rgba(239,68,68,0.08)] hover:border-[rgba(239,68,68,0.2)] transition">
               ✕ Discard &amp; Cancel Project
@@ -1321,6 +1540,61 @@ export function AudioEditor({ initialFileUrl, initialFileName }: AudioEditorProp
                 Close
               </button>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Portrait Orientation Guard */}
+      <AnimatePresence>
+        {isPortraitMobile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="relative w-28 h-28 flex items-center justify-center mb-6">
+              {/* Curved rotation arrow */}
+              <motion.svg
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 6, ease: "linear" }}
+                className="absolute w-24 h-24 text-[var(--accent-cyan)] opacity-40"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M4.5 12a7.5 7.5 0 0115 0" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12l-3-3m3 3l-3 3" />
+              </motion.svg>
+              {/* Rotating Phone */}
+              <motion.div
+                animate={{ rotate: [0, 90, 90, 0] }}
+                transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut", times: [0, 0.4, 0.6, 1] }}
+                className="w-12 h-20 border-2 border-[var(--accent-cyan)] rounded-xl relative flex items-center justify-center bg-[var(--bg-deep)] shadow-lg shadow-[var(--accent-cyan)]/10"
+              >
+                {/* Speaker */}
+                <div className="absolute top-1.5 w-6 h-0.5 bg-[var(--accent-cyan)] rounded-full opacity-60" />
+                {/* Home indicator */}
+                <div className="absolute bottom-1.5 w-8 h-1 bg-[var(--accent-cyan)] rounded-full opacity-60" />
+                {/* Visual screen content simulation */}
+                <div className="w-8 h-12 border border-[var(--accent-cyan)]/25 rounded bg-[var(--accent-cyan)]/5 flex flex-col justify-between p-1">
+                  <div className="w-full h-1 bg-[var(--accent-cyan)]/40 rounded-full" />
+                  <div className="w-3/4 h-1 bg-[var(--accent-cyan)]/30 rounded-full" />
+                  <div className="w-full h-1 bg-[var(--accent-cyan)]/30 rounded-full" />
+                </div>
+              </motion.div>
+            </div>
+            
+            <h2 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-3">
+              Rotate Your Device
+            </h2>
+            <p className="font-body text-sm text-[var(--text-secondary)] max-w-xs leading-relaxed mb-6">
+              The Audio Wave Editor requires landscape orientation to display the timeline and editor tools properly.
+            </p>
+            <div className="font-mono text-[10px] text-[var(--accent-cyan)] border border-[rgba(0,212,255,0.2)] bg-[rgba(0,212,255,0.04)] px-3 py-1.5 rounded-lg flex items-center gap-1.5 animate-pulse">
+              <span>🔄 Auto-rotates when you turn your phone</span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

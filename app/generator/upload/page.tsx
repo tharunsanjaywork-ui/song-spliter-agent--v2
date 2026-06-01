@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { useAuth } from "@/hooks/useAuth";
-import { wakeupServer } from "@/lib/api";
+import { wakeupServer, getJob } from "@/lib/api";
 import { doc, getDoc } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 
@@ -42,25 +42,28 @@ function YouTubePopup({ onClose }: { onClose: () => void }) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 20 }}
-        className="relative z-10 bg-[var(--bg-surface)] border border-[var(--glass-border)] rounded-2xl p-8 max-w-md w-full shadow-2xl"
+        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl"
       >
-        <div className="w-12 h-12 rounded-xl bg-[rgba(0,212,255,0.1)] border border-[rgba(0,212,255,0.2)] flex items-center justify-center text-2xl mb-4">
-          🎬
+        {/* Inner edge lighting border */}
+        <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none z-20" />
+
+        <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4">
+          <span className="material-symbols-outlined text-[28px]" style={{fontVariationSettings: "'FILL' 1"}}>smart_display</span>
         </div>
-        <h3 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-3">
+        <h3 className="font-display-lg text-[20px] font-bold text-on-surface mb-3">
           Download from YouTube
         </h3>
-        <p className="font-body text-sm text-[var(--text-secondary)] leading-relaxed mb-4">
+        <p className="font-body-md text-sm text-on-surface-variant leading-relaxed mb-6">
           Visit{" "}
           <a
             href="https://v2.yt1s.biz/en19/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--accent-cyan)] underline hover:text-cyan-300 font-semibold"
+            className="text-primary underline hover:text-cyan-300 font-semibold"
           >
-            https://v2.yt1s.biz/en19/
+            yt1s.biz
           </a>{" "}
-          to download your audio as MP3. Higher quality = more accurate results.
+          to download your audio as MP3. Higher quality results in more accurate splits.
           The site opens in a new tab. Come back here and upload the downloaded file.
         </p>
         <div className="flex gap-3">
@@ -68,13 +71,13 @@ function YouTubePopup({ onClose }: { onClose: () => void }) {
             href="https://v2.yt1s.biz/en19/"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 py-2.5 text-center font-body text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl hover:shadow-[0_0_15px_rgba(0,212,255,0.25)] hover:scale-[1.02] active:scale-[0.98] transition transform"
+            className="flex-1 py-3 text-center font-body-md text-sm font-semibold bg-secondary-container hover:bg-[#5235e8] text-on-surface rounded-full border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
           >
             Open Downloader
           </a>
           <button
             onClick={onClose}
-            className="flex-1 py-2.5 font-body text-sm font-semibold border border-[rgba(255,255,255,0.08)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-xl transition"
+            className="flex-1 py-3 font-body-md text-sm font-semibold border border-outline-variant hover:bg-surface-variant/50 text-on-surface-variant hover:text-on-surface rounded-full transition"
           >
             Close
           </button>
@@ -102,45 +105,47 @@ function DropZone({ dragOver, onDragOver, onDragLeave, onDrop, onClick }: DropZo
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       animate={{
-        borderColor: dragOver ? "rgba(0,212,255,0.8)" : "rgba(255,255,255,0.08)",
-        backgroundColor: dragOver ? "rgba(0,212,255,0.05)" : "rgba(255,255,255,0.02)",
+        borderColor: dragOver ? "rgba(168,232,255,0.8)" : "rgba(60, 73, 78, 0.4)",
+        backgroundColor: dragOver ? "rgba(168,232,255,0.05)" : "rgba(14, 14, 14, 0.4)",
         scale: dragOver ? 1.02 : 1,
       }}
       transition={{ duration: 0.2 }}
-      className={`w-full border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer min-h-[260px] select-none h-full ${
-        dragOver ? "" : "pulse-border"
+      className={`w-full border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer min-h-[300px] select-none h-full relative ${
+        dragOver ? "" : "animate-pulse-border"
       }`}
     >
       <motion.div
         animate={{ y: dragOver ? -4 : 0 }}
         transition={{ duration: 0.2 }}
-        className="text-5xl mb-4"
+        className="w-16 h-16 rounded-full bg-surface-variant/50 flex items-center justify-center text-primary mb-4"
       >
-        {dragOver ? "⬇️" : "🎵"}
+        <span className="material-symbols-outlined text-[32px]">
+          {dragOver ? "download" : "cloud_upload"}
+        </span>
       </motion.div>
-      <p className="font-heading text-lg font-bold text-[var(--text-primary)] mb-2 text-center">
-        {dragOver ? "Drop your audio file here" : "Drag & drop your audio file"}
+      <p className="font-display-lg text-[18px] font-bold text-on-surface mb-2 text-center">
+        {dragOver ? "Drop your audio file here" : "Drag & drop audio file here"}
       </p>
-      <p className="font-body text-sm text-[var(--text-secondary)] mb-4 text-center">
+      <p className="font-body-md text-sm text-on-surface-variant mb-6 text-center">
         or click to browse your files
       </p>
       
       {/* Choose File Button inside Dropzone */}
-      <button className="px-5 py-2.5 bg-[rgba(255,255,255,0.04)] border border-[var(--glass-border)] rounded-xl font-body text-xs font-semibold hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--text-primary)] text-[var(--text-secondary)] transition mb-6 shadow-md transform active:scale-95 duration-200">
-        Choose File
+      <button className="px-5 py-2 bg-surface-bright hover:bg-surface-variant rounded-full font-technical-sm text-technical-sm text-on-surface border border-white/5 transition mb-6 shadow-md transform active:scale-95 duration-200">
+        Browse Files
       </button>
 
       <div className="flex flex-wrap gap-2 justify-center">
         {["MP3", "WAV", "OGG", "FLAC", "AAC", "M4A"].map((ext) => (
           <span
             key={ext}
-            className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-[rgba(0,212,255,0.08)] border border-[rgba(0,212,255,0.2)] text-[var(--accent-cyan)]"
+            className="font-technical-xs text-[10px] px-2 py-0.5 rounded-full bg-primary/10 border border-primary/25 text-primary"
           >
             .{ext.toLowerCase()}
           </span>
         ))}
       </div>
-      <p className="font-body text-xs text-[var(--text-muted)] mt-3">Maximum file size: 500 MB</p>
+      <p className="font-technical-xs text-[11px] text-on-surface-variant mt-4">Supported up to 500 MB</p>
     </motion.div>
   );
 }
@@ -159,35 +164,38 @@ function FileAcceptedCard({ file, onRemove }: FileAcceptedProps) {
       initial={{ opacity: 0, scale: 0.9, y: 10 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      className="w-full bg-[rgba(34,197,94,0.06)] border border-[rgba(34,197,94,0.25)] rounded-2xl p-6 flex items-center gap-4"
+      className="w-full bg-tertiary-container/10 border border-tertiary-container/30 rounded-2xl p-6 flex items-center gap-4 relative overflow-hidden"
     >
+      {/* Inner edge lighting border */}
+      <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none" />
+
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         transition={{ type: "spring", stiffness: 400, damping: 15, delay: 0.1 }}
-        className="w-12 h-12 rounded-xl bg-[rgba(34,197,94,0.15)] border border-[rgba(34,197,94,0.3)] flex items-center justify-center text-xl flex-shrink-0 animate-pulse"
+        className="w-12 h-12 rounded-xl bg-tertiary/15 border border-tertiary/30 flex items-center justify-center text-tertiary flex-shrink-0 animate-pulse"
       >
-        ✅
+        <span className="material-symbols-outlined text-[24px]">check_circle</span>
       </motion.div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="font-body text-sm font-semibold text-[var(--text-primary)] truncate">
+          <p className="font-body-md text-sm font-semibold text-on-surface truncate">
             {file.name}
           </p>
-          <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-[rgba(34,197,94,0.15)] text-[var(--success)] border border-[rgba(34,197,94,0.3)] uppercase flex-shrink-0">
+          <span className="font-technical-xs text-[9px] px-1.5 py-0.5 rounded bg-tertiary/15 text-tertiary border border-tertiary/30 uppercase flex-shrink-0">
             {ext.replace(".", "")}
           </span>
         </div>
-        <p className="font-mono text-xs text-[var(--text-secondary)] mt-0.5">
+        <p className="font-technical-xs text-[11px] text-on-surface-variant mt-0.5">
           {formatFileSize(file.size)}
         </p>
       </div>
       <button
         onClick={onRemove}
         aria-label="Remove selected file"
-        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--error)] hover:bg-[rgba(239,68,68,0.1)] transition flex-shrink-0"
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-error hover:bg-error/10 transition flex-shrink-0"
       >
-        ✕
+        <span className="material-symbols-outlined text-[20px]">close</span>
       </button>
     </motion.div>
   );
@@ -219,6 +227,37 @@ export default function GeneratorUploadPage() {
 
     const checkStatusAndWakeup = async () => {
       try {
+        if (typeof window !== "undefined") {
+          // 1. Check for active generator route persistence
+          const activeRoute = localStorage.getItem("active_generator_route");
+          if (activeRoute && activeRoute !== "/generator/upload") {
+            router.push(activeRoute);
+            return;
+          }
+
+          // 2. Fallback check for active split job status
+          const activeJob = localStorage.getItem("active_split_job");
+          if (activeJob) {
+            try {
+              const res = await getJob(activeJob);
+              if (res.success && res.data) {
+                const status = res.data.status;
+                if (status === "complete") {
+                  router.push(`/generator/preview?jobId=${activeJob}`);
+                  return;
+                } else if (status === "processing") {
+                  router.push("/generator/processing");
+                  return;
+                }
+              }
+              localStorage.removeItem("active_split_job");
+            } catch {
+              router.push("/generator/processing");
+              return;
+            }
+          }
+        }
+
         // Client-side Firestore check — no backend cold start needed
         const userDocRef = doc(getFirebaseDb(), "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
@@ -227,6 +266,8 @@ export default function GeneratorUploadPage() {
           router.push("/generator/setup");
           return;
         }
+        localStorage.setItem("active_route", "/generator/upload");
+        localStorage.setItem("active_generator_route", "/generator/upload");
         setCheckingSetup(false);
       } catch (err) {
         console.error("Setup check error:", err);
@@ -301,9 +342,9 @@ export default function GeneratorUploadPage() {
   // Render Premium Skeleton Loading Resolution State
   if (authLoading || checkingSetup) {
     return (
-      <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col justify-center items-center">
-        <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
-        <p className="font-body text-sm text-[var(--text-secondary)] mt-4 animate-pulse">
+      <div className="min-h-screen bg-background flex flex-col justify-center items-center">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <p className="font-body-md text-sm text-on-surface-variant mt-4 animate-pulse">
           Securing session and verifying credentials...
         </p>
       </div>
@@ -311,23 +352,30 @@ export default function GeneratorUploadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-deep)] text-[var(--text-primary)] flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-background text-on-surface flex flex-col relative overflow-hidden">
       <Navbar />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 max-w-4xl mx-auto w-full z-10">
+      {/* Atmospheric mesh gradient background */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[60vw] h-[60vw] rounded-full bg-primary/10 blur-[150px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] rounded-full bg-secondary-container/20 blur-[120px]" />
+        <div className="absolute inset-0 bg-grid-pattern opacity-30" />
+      </div>
+
+      <main className="flex-grow flex flex-col items-center justify-center px-6 py-12 max-w-5xl mx-auto w-full z-10 pt-24">
         
         {/* Page Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-center mb-10 w-full"
+          className="text-center mb-12 w-full max-w-2xl"
         >
-          <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] bg-clip-text text-transparent mb-3">
-            Add Your Mixtape
+          <h1 className="font-display-lg text-display-lg text-on-surface tracking-tight mb-4 drop-shadow-md">
+            AI Mixtape Splitter
           </h1>
-          <p className="font-body text-sm text-[var(--text-secondary)] max-w-md mx-auto">
-            Harness AI pipeline to split your downloaded YouTube mixtape audio into properly segmented, fully named individual songs.
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            Import a continuous audio file or YouTube mix, and split it into named songs using our AI pipeline.
           </p>
         </motion.div>
 
@@ -338,14 +386,14 @@ export default function GeneratorUploadPage() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="w-full mb-6 p-4 bg-[rgba(0,212,255,0.06)] border border-[rgba(0,212,255,0.2)] rounded-xl flex items-center gap-3"
+              className="w-full mb-6 p-4 bg-primary/5 border border-primary/20 rounded-xl flex items-center gap-3"
             >
-              <div className="w-5 h-5 border-2 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
               <div className="flex-1">
-                <p className="font-body text-sm font-semibold text-[var(--accent-cyan)]">
+                <p className="font-body-md text-sm font-semibold text-primary">
                   Waking up server... (~30s)
                 </p>
-                <p className="font-body text-xs text-[var(--text-secondary)]">
+                <p className="font-technical-xs text-xs text-on-surface-variant">
                   The backend service is cold starting. Please wait while we initialize the AI pipeline.
                 </p>
               </div>
@@ -360,10 +408,10 @@ export default function GeneratorUploadPage() {
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="w-full mb-6 p-3.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.25)] rounded-xl flex items-start gap-2"
+              className="w-full mb-6 p-4 bg-error-container/20 border border-error/30 rounded-xl flex items-start gap-2 text-error"
             >
-              <span className="text-[var(--error)] mt-0.5">⚠️</span>
-              <span className="font-body text-sm text-[var(--error)]">{error}</span>
+              <span className="material-symbols-outlined text-[20px] mt-0.5">warning</span>
+              <span className="font-body-md text-sm">{error}</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -379,7 +427,7 @@ export default function GeneratorUploadPage() {
         />
 
         {/* Action Container */}
-        <div className="w-full max-w-3xl">
+        <div className="w-full">
           <AnimatePresence mode="wait">
             {!fileLocal ? (
               <motion.div
@@ -388,38 +436,51 @@ export default function GeneratorUploadPage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.3 }}
-                className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full h-full"
+                className="w-full bg-surface-container/60 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row relative"
               >
-                {/* Option 1: YouTube Downloader Helper Card */}
-                <div
-                  onClick={() => setShowYouTubePopup(true)}
-                  className="group cursor-pointer bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-8 backdrop-blur-[20px] hover:border-[var(--accent-cyan)] hover:shadow-[0_0_25px_rgba(0,212,255,0.1)] transition duration-300 flex flex-col justify-between"
-                >
-                  <div>
-                    <div className="w-12 h-12 rounded-xl bg-[rgba(0,212,255,0.1)] flex items-center justify-center border border-[rgba(0,212,255,0.25)] text-[var(--accent-cyan)] mb-6 transition duration-300 group-hover:scale-110 shadow-[0_0_10px_rgba(0,212,255,0.1)] text-2xl">
-                      🎬
-                    </div>
-                    <h3 className="font-heading text-xl font-bold text-[var(--text-primary)] mb-3">
-                      I have a YouTube link
-                    </h3>
-                    <p className="font-body text-sm text-[var(--text-secondary)] leading-relaxed">
-                      mixtapes and playlists from YouTube need to be downloaded as MP3s first. Learn how to convert them in 2 steps for splitting.
-                    </p>
+                {/* Inner edge lighting border */}
+                <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none z-20" />
+
+                {/* Left Column: Drop Zone */}
+                <div className="flex-grow p-6 md:p-12 flex flex-col min-h-[400px] items-center justify-center text-center relative z-10 md:w-1/2">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="material-symbols-outlined text-primary text-[24px]" style={{fontVariationSettings: "'FILL' 1"}}>audio_file</span>
+                    <h3 className="font-display-lg text-[20px] font-bold text-on-surface">Local File</h3>
                   </div>
-                  <span className="font-body text-xs font-semibold text-[var(--accent-cyan)] mt-6 inline-block group-hover:underline">
-                    Get MP3 Downloader →
+                  <div className="w-full flex-grow">
+                    <DropZone
+                      dragOver={dragOver}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                    />
+                  </div>
+                </div>
+
+                {/* Center Separator */}
+                <div className="md:w-[1px] md:h-auto h-[1px] w-full bg-gradient-to-b from-transparent via-outline-variant to-transparent flex items-center justify-center relative md:my-0 my-4 z-10">
+                  <span className="absolute bg-surface-container-highest border border-outline-variant rounded-full px-3 py-1 font-technical-sm text-technical-xs text-on-surface-variant font-bold">
+                    OR
                   </span>
                 </div>
 
-                {/* Option 2: Upload File Drag & Drop Card */}
-                <div className="h-full">
-                  <DropZone
-                    dragOver={dragOver}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                  />
+                {/* Right Column: YouTube Link Info */}
+                <div className="flex-grow p-6 md:p-12 flex flex-col justify-center min-h-[400px] text-center items-center relative z-10 md:w-1/2">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="material-symbols-outlined text-secondary text-[24px]" style={{fontVariationSettings: "'FILL' 1"}}>smart_display</span>
+                    <h3 className="font-display-lg text-[20px] font-bold text-on-surface">YouTube Mix</h3>
+                  </div>
+                  <p className="font-body-md text-sm text-on-surface-variant leading-relaxed max-w-sm mb-8">
+                    mixtapes and playlists from YouTube need to be downloaded as MP3s first. Learn how to convert them in 2 steps for splitting.
+                  </p>
+                  <button
+                    onClick={() => setShowYouTubePopup(true)}
+                    className="w-full max-w-xs py-3.5 rounded-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] flex items-center justify-center gap-2 transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <span className="material-symbols-outlined text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>auto_fix_high</span>
+                    I Have a YouTube Link
+                  </button>
                 </div>
               </motion.div>
             ) : (
@@ -445,9 +506,9 @@ export default function GeneratorUploadPage() {
               exit={{ opacity: 0, y: 12, scale: 0.95 }}
               transition={{ type: "spring", stiffness: 300, damping: 20 }}
               onClick={handleStartProcessing}
-              className="mt-8 w-full max-w-md py-4 font-body text-base font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-violet)] text-white rounded-xl shadow-lg hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:scale-[1.02] active:scale-[0.98] transition transform duration-200 flex items-center justify-center gap-3"
+              className="mt-8 w-full max-w-md py-4 rounded-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-headline-lg-mobile text-[16px] font-semibold ai-glow border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] flex items-center justify-center gap-3 transition transform duration-200"
             >
-              <span className="text-xl">🚀</span>
+              <span className="material-symbols-outlined text-[22px]" style={{fontVariationSettings: "'FILL' 1"}}>auto_fix_high</span>
               <span>Start Processing</span>
             </motion.button>
           )}
@@ -458,21 +519,6 @@ export default function GeneratorUploadPage() {
       <AnimatePresence>
         {showYouTubePopup && <YouTubePopup onClose={() => setShowYouTubePopup(false)} />}
       </AnimatePresence>
-
-      <style jsx global>{`
-        .pulse-border {
-          animation: borderPulse 3s infinite ease-in-out;
-        }
-
-        @keyframes borderPulse {
-          0%, 100% {
-            border-color: var(--glass-border);
-          }
-          50% {
-            border-color: rgba(0, 212, 255, 0.3);
-          }
-        }
-      `}</style>
     </div>
   );
 }

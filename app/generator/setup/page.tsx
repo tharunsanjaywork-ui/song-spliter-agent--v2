@@ -15,8 +15,46 @@ function GeneratorSetupPage() {
   // Active section state: openrouter or acrcloud
   const [section, setSection] = useState<"openrouter" | "acrcloud" | null>(null);
 
-  // Read query params and scroll to section on mount
+  // Input states
+  const [openrouterKey, setOpenrouterKey] = useState("");
+  const [acoustidKey, setAcoustidKey] = useState("");
+
+  // Load status and pre-fill if keys are complete, prioritizing sessionStorage
   useEffect(() => {
+    const savedSection = sessionStorage.getItem("setup_section") as "openrouter" | "acrcloud" | null;
+    const savedOpenRouter = sessionStorage.getItem("setup_openrouter_key");
+    const savedAcoustId = sessionStorage.getItem("setup_acoustid_key");
+
+    if (savedSection) setSection(savedSection);
+    if (savedOpenRouter) setOpenrouterKey(savedOpenRouter);
+    if (savedAcoustId) setAcoustidKey(savedAcoustId);
+
+    const fetchStatus = async () => {
+      try {
+        const res = await getKeysStatus();
+        if (res.success && res.setupComplete) {
+          if (!savedOpenRouter) {
+            setOpenrouterKey("sk-or-keep-existing-key-placeholder");
+          }
+          if (!savedAcoustId) {
+            setAcoustidKey("keep-existing-acoustid-key-placeholder");
+          }
+        }
+      } catch (err) {
+        console.error("Failed to check keys status:", err);
+      }
+    };
+    fetchStatus();
+  }, []);
+
+  // Read query params and scroll to section on mount if no session is stored
+  useEffect(() => {
+    const savedSection = sessionStorage.getItem("setup_section") as "openrouter" | "acrcloud" | null;
+    if (savedSection) {
+      setSection(savedSection);
+      return;
+    }
+
     if (sectionParam === "acr" || sectionParam === "acrcloud") {
       setSection("acrcloud");
       setTimeout(() => {
@@ -27,25 +65,24 @@ function GeneratorSetupPage() {
     }
   }, [sectionParam]);
 
-  // Input states
-  const [openrouterKey, setOpenrouterKey] = useState("");
-  const [acoustidKey, setAcoustidKey] = useState("");
-
-  // Load status and pre-fill if keys are complete
+  // Sync state to sessionStorage
   useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await getKeysStatus();
-        if (res.success && res.setupComplete) {
-          setOpenrouterKey("sk-or-keep-existing-key-placeholder");
-          setAcoustidKey("keep-existing-acoustid-key-placeholder");
-        }
-      } catch (err) {
-        console.error("Failed to check keys status:", err);
-      }
-    };
-    fetchStatus();
-  }, []);
+    if (section) {
+      sessionStorage.setItem("setup_section", section);
+    }
+  }, [section]);
+
+  useEffect(() => {
+    if (openrouterKey) {
+      sessionStorage.setItem("setup_openrouter_key", openrouterKey);
+    }
+  }, [openrouterKey]);
+
+  useEffect(() => {
+    if (acoustidKey) {
+      sessionStorage.setItem("setup_acoustid_key", acoustidKey);
+    }
+  }, [acoustidKey]);
 
   // Validation/UI states
   const [errorMsg, setErrorMsg] = useState("");
@@ -142,6 +179,9 @@ function GeneratorSetupPage() {
     );
 
     if (result.success) {
+      sessionStorage.removeItem("setup_section");
+      sessionStorage.removeItem("setup_openrouter_key");
+      sessionStorage.removeItem("setup_acoustid_key");
       router.push("/generator/upload");
     } else {
       setErrorMsg(result.error || "Failed to save API credentials. Please try again.");

@@ -758,7 +758,7 @@ async def run_pipeline(
         logger.warning("ACRCloud credentials invalid for user %s: %s", uid, exc)
         yield {
             "step": "error",
-            "error_type": "general",
+            "error_type": "acr_limit_exceeded",
             "message": "ACRCloud credentials verification failed. Please check your ACR Host, Access Key, and Secret Key in the Setup Guide."
         }
 
@@ -770,13 +770,20 @@ async def run_pipeline(
         logger.exception("Pipeline error for user %s: %s", uid, exc)
         err_msg = str(exc)
         if "401" in err_msg or "unauthorized" in err_msg.lower() or "invalid api key" in err_msg.lower():
-            msg = "OpenRouter authentication failed. Please verify your OpenRouter API key in the Setup Guide."
+            yield {
+                "step": "error",
+                "error_type": "openrouter_limit_exceeded",
+                "message": "OpenRouter authentication failed. Please verify your OpenRouter API key in the Setup Guide."
+            }
         elif "authentication" in err_msg.lower() or "credentials" in err_msg.lower():
-            msg = "Authentication failed. Please check your API keys."
+            yield {
+                "step": "error",
+                "error_type": "general",
+                "message": "Authentication failed. Please check your API keys."
+            }
         else:
-            msg = f"Something went wrong on the server: {err_msg}"
-        yield {
-            "step": "error",
-            "error_type": "general",
-            "message": msg,
-        }
+            yield {
+                "step": "error",
+                "error_type": "general",
+                "message": f"Something went wrong on the server: {err_msg}"
+            }

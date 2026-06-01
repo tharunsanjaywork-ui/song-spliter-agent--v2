@@ -26,6 +26,8 @@ export interface JobData {
   status: string;
   fileCount: number;
   files: JobFile[];
+  errorType?: string;
+  errorMessage?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
