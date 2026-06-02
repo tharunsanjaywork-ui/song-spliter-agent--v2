@@ -431,3 +431,151 @@ export async function decodeAudioDataWithRetry(
   );
 }
 
+/**
+ * Splits an MP3 ArrayBuffer at a specific timestamp in seconds.
+ * Scans MP3 frame sync bytes and calculates durations to find the exact split offset.
+ * Returns two separate ArrayBuffers.
+ */
+export function splitMp3AtTimestamp(
+  arrayBuffer: ArrayBuffer,
+  splitTimeSec: number
+): { part1: ArrayBuffer; part2: ArrayBuffer; actualSplitTime: number } {
+  const bytes = new Uint8Array(arrayBuffer);
+  const len = bytes.length;
+  let offset = 0;
+
+  const bitrateTableV1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+  const bitrateTableV2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+  const sampleRateTable = [
+    [44100, 48000, 32000, 0], // V1
+    [22050, 24000, 16000, 0], // V2
+    [11025, 12000, 8000, 0]   // V2.5
+  ];
+
+  let cumulativeTime = 0;
+  let splitOffset = -1;
+  let actualSplitTime = 0;
+
+  while (offset < len - 4) {
+    if (bytes[offset] !== 0xFF || (bytes[offset + 1] & 0xE0) !== 0xE0) {
+      offset++;
+      continue;
+    }
+
+    const versionIndex = (bytes[offset + 1] >> 3) & 0x03;
+    const layer = (bytes[offset + 1] >> 1) & 0x03;
+    const bitrateIndex = (bytes[offset + 2] >> 4) & 0x0F;
+    const sampleRateIndex = (bytes[offset + 2] >> 2) & 0x03;
+    const padding = (bytes[offset + 2] >> 1) & 0x01;
+
+    if (versionIndex === 1 || layer === 0 || bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) {
+      offset++;
+      continue;
+    }
+
+    const versionMap = [2, -1, 1, 0];
+    const version = versionMap[versionIndex];
+    if (version === -1) {
+      offset++;
+      continue;
+    }
+
+    const bitrate = version === 0 ? bitrateTableV1[bitrateIndex] * 1000 : bitrateTableV2[bitrateIndex] * 1000;
+    const sampleRate = sampleRateTable[version][sampleRateIndex];
+
+    let frameSize = 0;
+    if (layer === 3) {
+      frameSize = Math.floor((12 * bitrate) / sampleRate + padding) * 4;
+    } else {
+      const coefficients = version === 0 ? 144 : 72;
+      frameSize = Math.floor((coefficients * bitrate) / sampleRate) + padding;
+    }
+
+    if (frameSize <= 0) {
+      offset++;
+      continue;
+    }
+
+    let samplesPerFrame = 1152;
+    if (layer === 3) {
+      samplesPerFrame = version === 0 ? 1152 : 576;
+    } else if (layer === 1) {
+      samplesPerFrame = 384;
+    }
+
+    const frameDuration = samplesPerFrame / sampleRate;
+
+    if (cumulativeTime >= splitTimeSec && splitOffset === -1) {
+      splitOffset = offset;
+      actualSplitTime = cumulativeTime;
+    }
+
+    cumulativeTime += frameDuration;
+    offset += frameSize;
+  }
+
+  if (splitOffset === -1 || splitOffset === 0 || splitOffset >= len) {
+    splitOffset = Math.floor(len / 2);
+    actualSplitTime = cumulativeTime / 2;
+  }
+
+  const part1 = arrayBuffer.slice(0, splitOffset);
+  const part2 = arrayBuffer.slice(splitOffset);
+
+  return { part1, part2, actualSplitTime };
+}
+
+/**
+ * Splits a WAV ArrayBuffer at a specific timestamp in seconds.
+ * Recalculates WAV chunk and data header sizes for both output buffers.
+ * Returns two separate ArrayBuffers.
+ */
+export function splitWavAtTimestamp(
+  arrayBuffer: ArrayBuffer,
+  splitTimeSec: number
+): { part1: ArrayBuffer; part2: ArrayBuffer } {
+  const bytes = new Uint8Array(arrayBuffer);
+  if (bytes.length < 44) {
+    const mid = Math.floor(arrayBuffer.byteLength / 2);
+    return { part1: arrayBuffer.slice(0, mid), part2: arrayBuffer.slice(mid) };
+  }
+
+  const view = new DataView(arrayBuffer);
+  const sampleRate = view.getUint32(24, true);
+  const blockAlign = view.getUint16(32, true);
+
+  const sampleIndex = Math.floor(splitTimeSec * sampleRate);
+  let splitDataByteOffset = sampleIndex * blockAlign;
+  const totalDataBytes = bytes.length - 44;
+
+  if (splitDataByteOffset <= 0) {
+    splitDataByteOffset = Math.floor(totalDataBytes / 2);
+  }
+  splitDataByteOffset = Math.min(totalDataBytes, splitDataByteOffset);
+  splitDataByteOffset = Math.floor(splitDataByteOffset / blockAlign) * blockAlign;
+
+  const part1DataSize = splitDataByteOffset;
+  const part2DataSize = totalDataBytes - splitDataByteOffset;
+
+  // Create part 1
+  const part1Buffer = new ArrayBuffer(44 + part1DataSize);
+  const part1Bytes = new Uint8Array(part1Buffer);
+  part1Bytes.set(bytes.subarray(0, 44));
+  part1Bytes.set(bytes.subarray(44, 44 + part1DataSize), 44);
+  const part1View = new DataView(part1Buffer);
+  part1View.setUint32(4, 36 + part1DataSize, true);
+  part1View.setUint32(40, part1DataSize, true);
+
+  // Create part 2
+  const part2Buffer = new ArrayBuffer(44 + part2DataSize);
+  const part2Bytes = new Uint8Array(part2Buffer);
+  part2Bytes.set(bytes.subarray(0, 44));
+  part2Bytes.set(bytes.subarray(44 + part1DataSize), 44);
+  const part2View = new DataView(part2Buffer);
+  part2View.setUint32(4, 36 + part2DataSize, true);
+  part2View.setUint32(40, part2DataSize, true);
+
+  return { part1: part1Buffer, part2: part2Buffer };
+}
+
+

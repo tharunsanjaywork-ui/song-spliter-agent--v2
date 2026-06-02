@@ -8,6 +8,7 @@ import Navbar from "@/components/Navbar";
 import { useGeneratorContext } from "@/context/GeneratorContext";
 import { wakeupServer, streamProcess, ProcessingEvent, getJob } from "@/lib/api";
 import { analyzeAudioFile } from "@/lib/audioAnalyzer";
+import { getAudioDuration, splitMp3AtTimestamp, splitWavAtTimestamp } from "@/lib/audioUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -144,12 +145,86 @@ function PreviewWarningModal({ onConfirm }: { onConfirm: () => void }) {
 // ─── Large File Warning Modal ──────────────────────────────────────────────────
 
 function LargeFileWarningModal({
+  file,
+  durationSec,
+  setSelectedFile,
   onCancel,
   onContinue,
 }: {
+  file: File;
+  durationSec: number;
+  setSelectedFile: (file: File | null) => void;
   onCancel: () => void;
   onContinue: () => void;
 }) {
+  const midSec = durationSec / 2;
+  const initialH = Math.floor(midSec / 3600);
+  const initialM = Math.floor((midSec % 3600) / 60);
+  const initialS = Math.floor(midSec % 60);
+
+  const [hours, setHours] = useState(initialH);
+  const [minutes, setMinutes] = useState(initialM);
+  const [seconds, setSeconds] = useState(initialS);
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const formatTime = (secs: number) => {
+    const hrs = Math.floor(secs / 3600);
+    const mins = Math.floor((secs % 3600) / 60);
+    const s = Math.floor(secs % 60);
+    return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const handleSplit = async () => {
+    const splitSec = hours * 3600 + minutes * 60 + seconds;
+    if (splitSec <= 0 || splitSec >= durationSec) {
+      setError(`Please choose a timestamp between 00:00:01 and ${formatTime(durationSec)}.`);
+      return;
+    }
+    setError(null);
+    setIsSplitting(true);
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+      const baseName = file.name.replace(/\.[^.]+$/, "");
+      
+      let parts: { part1: ArrayBuffer; part2: ArrayBuffer };
+      if (ext === "mp3") {
+        parts = splitMp3AtTimestamp(arrayBuffer, splitSec);
+      } else if (ext === "wav") {
+        parts = splitWavAtTimestamp(arrayBuffer, splitSec);
+      } else {
+        const midOffset = Math.floor((splitSec / durationSec) * arrayBuffer.byteLength);
+        parts = {
+          part1: arrayBuffer.slice(0, midOffset),
+          part2: arrayBuffer.slice(midOffset)
+        };
+      }
+
+      const mimeType = file.type || (ext === "wav" ? "audio/wav" : "audio/mpeg");
+      const part1File = new File([parts.part1], `${baseName}_part1.${ext}`, { type: mimeType });
+      const part2File = new File([parts.part2], `${baseName}_part2.${ext}`, { type: mimeType });
+
+      const FileSaver = await import("file-saver");
+      const saveAs = FileSaver.default || FileSaver.saveAs || FileSaver;
+      
+      saveAs(part1File, `${baseName}_part1.${ext}`);
+      await new Promise((r) => setTimeout(r, 400));
+      saveAs(part2File, `${baseName}_part2.${ext}`);
+
+      setSelectedFile(part1File);
+      onContinue();
+    } catch (err) {
+      console.error("Split execution error:", err);
+      setError("Failed to split the audio file. Please ensure it is a valid format.");
+    } finally {
+      setIsSplitting(false);
+    }
+  };
+
+  const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -163,32 +238,129 @@ function LargeFileWarningModal({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 20 }}
-        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl"
+        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl max-h-[90vh] overflow-y-auto"
       >
         <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none" />
         <div className="w-12 h-12 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/30 flex items-center justify-center text-[#f59e0b] mb-4">
           <span className="material-symbols-outlined text-[28px]">warning</span>
         </div>
         <h3 className="font-display-lg text-[20px] font-bold text-on-surface mb-3">
-          Large File Warning
+          Large File Option
         </h3>
-        <p className="font-body-md text-sm text-on-surface-variant leading-relaxed mb-6">
-          This audio file is larger than 40 MB. To prevent browser crashes, the analysis will be performed sequentially in chunks. This process may take 1 to 3 minutes. Please keep this tab active.
-        </p>
-        <div className="flex gap-3">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3 font-body-md text-sm font-semibold border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/30 rounded-full transition"
-          >
-            Cancel
-          </button>
+        
+        <div className="mb-6">
+          <h4 className="font-heading text-sm font-semibold text-on-surface mb-2">
+            Option A: Process as a single large file
+          </h4>
+          <p className="font-body text-xs text-on-surface-variant leading-relaxed mb-3">
+            The analysis will be performed sequentially in chunks. This process may take 1 to 3 minutes. Please keep this tab active.
+          </p>
           <button
             onClick={onContinue}
-            className="flex-1 py-3 font-body-md text-sm font-semibold bg-secondary-container hover:bg-[#5235e8] text-on-surface rounded-full border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full py-2.5 font-body-md text-xs font-semibold bg-surface-container-highest hover:bg-surface-container-highest/80 text-on-surface rounded-full transition"
           >
-            Continue
+            Continue as single file
           </button>
         </div>
+
+        <div className="border-t border-outline-variant/30 pt-6 mt-6">
+          <h4 className="font-heading text-sm font-semibold text-on-surface mb-2">
+            Option B: Or split this file into two parts
+          </h4>
+          <p className="font-body text-xs text-on-surface-variant leading-relaxed mb-4">
+            Directly slice the audio file in your browser at a specific time (such as between songs) to process each part separately. This preserves 100% of the original quality instantly.
+          </p>
+
+          <div className="flex items-center justify-center gap-2 font-mono text-xl bg-surface-container-highest/20 border border-outline-variant/40 rounded-xl p-3 my-4">
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] uppercase tracking-wider text-on-surface-variant mb-1 font-body">HH</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                className="w-12 bg-transparent text-center focus:outline-none focus:text-[var(--accent-cyan)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-semibold text-[20px]"
+                value={hours.toString().padStart(2, "0")}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(23, parseInt(e.target.value) || 0));
+                  setHours(val);
+                }}
+              />
+            </div>
+            <span className="self-end mb-2">:</span>
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] uppercase tracking-wider text-on-surface-variant mb-1 font-body">MM</span>
+              <input
+                type="number"
+                min={0}
+                max={59}
+                className="w-12 bg-transparent text-center focus:outline-none focus:text-[var(--accent-cyan)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-semibold text-[20px]"
+                value={minutes.toString().padStart(2, "0")}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                  setMinutes(val);
+                }}
+              />
+            </div>
+            <span className="self-end mb-2">:</span>
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] uppercase tracking-wider text-on-surface-variant mb-1 font-body">SS</span>
+              <input
+                type="number"
+                min={0}
+                max={59}
+                className="w-12 bg-transparent text-center focus:outline-none focus:text-[var(--accent-cyan)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-semibold text-[20px]"
+                value={seconds.toString().padStart(2, "0")}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                  setSeconds(val);
+                }}
+              />
+            </div>
+          </div>
+          
+          <div className="text-center mb-4">
+            <span className="font-body text-xs text-[var(--accent-cyan)] font-medium">
+              Recommended: Split at {formatTime(midSec)} (exact midpoint)
+            </span>
+          </div>
+
+          {ext !== "mp3" && ext !== "wav" && (
+            <div className="mb-4 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 text-left">
+              <p className="font-body text-[10px] text-[#f59e0b] leading-normal">
+                ⚠️ Direct splitting is optimized for MP3 and WAV files. For other formats (like M4A), splitting is performed at the raw byte level, which may result in unplayable parts. We recommend converting the file to MP3 first.
+              </p>
+            </div>
+          )}
+
+          {error && (
+            <p className="font-body text-xs text-error mb-4 text-center">{error}</p>
+          )}
+
+          <button
+            onClick={handleSplit}
+            disabled={isSplitting}
+            className="w-full py-3 rounded-full bg-secondary-container hover:bg-[#5235e8] text-on-surface font-body-md text-sm font-semibold border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 flex items-center justify-center gap-2"
+          >
+            {isSplitting ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Slicing audio file...
+              </>
+            ) : (
+              "Split & Process Part 1"
+            )}
+          </button>
+        </div>
+
+        <button
+          onClick={onCancel}
+          className="w-full py-2.5 mt-4 font-body-md text-xs font-semibold border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/30 rounded-full transition"
+        >
+          Cancel
+        </button>
       </motion.div>
     </motion.div>
   );
@@ -198,7 +370,7 @@ function LargeFileWarningModal({
 
 export default function GeneratorProcessingPage() {
   const router = useRouter();
-  const { selectedFile, jobId, setJobId: setContextJobId } = useGeneratorContext();
+  const { selectedFile, setSelectedFile, jobId, setJobId: setContextJobId } = useGeneratorContext();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -206,6 +378,18 @@ export default function GeneratorProcessingPage() {
     localStorage.setItem("active_route", "/generator/processing");
     localStorage.setItem("active_generator_route", "/generator/processing");
   }, []);
+
+  const [fileDuration, setFileDuration] = useState<number>(0);
+
+  useEffect(() => {
+    if (selectedFile) {
+      getAudioDuration(selectedFile).then((dur) => {
+        const finalDur = dur > 0 ? dur : selectedFile.size / (128 * 1024 / 8);
+        setFileDuration(finalDur);
+      });
+    }
+  }, [selectedFile]);
+
   const [thinkingSeconds, setThinkingSeconds] = useState(0);
   const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
   const [largeFileConfirmed, setLargeFileConfirmed] = useState(false);
@@ -939,8 +1123,11 @@ export default function GeneratorProcessingPage() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showLargeFileWarning && (
+        {showLargeFileWarning && selectedFile && (
           <LargeFileWarningModal
+            file={selectedFile}
+            durationSec={fileDuration}
+            setSelectedFile={setSelectedFile}
             onCancel={() => {
               setShowLargeFileWarning(false);
               router.push("/generator/upload");
