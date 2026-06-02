@@ -139,12 +139,27 @@ export async function audioBufferToMp3(
   onProgress?: (percent: number) => void
 ): Promise<Blob> {
   let lamejs;
+  /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const g = globalThis as any;
+    g.MPEGMode = require("lamejs/src/js/MPEGMode.js");
+    g.Lame = require("lamejs/src/js/Lame.js");
+    g.Presets = require("lamejs/src/js/Presets.js");
+    g.GainAnalysis = require("lamejs/src/js/GainAnalysis.js");
+    g.QuantizePVT = require("lamejs/src/js/QuantizePVT.js");
+    g.Quantize = require("lamejs/src/js/Quantize.js");
+    g.Takehiro = require("lamejs/src/js/Takehiro.js");
+    g.Reservoir = require("lamejs/src/js/Reservoir.js");
+    g.BitStream = require("lamejs/src/js/BitStream.js");
+    g.Encoder = require("lamejs/src/js/Encoder.js");
+    g.Version = require("lamejs/src/js/Version.js");
+    g.VBRTag = require("lamejs/src/js/VBRTag.js");
+    
     lamejs = require("lamejs");
   } catch (err) {
     throw new Error("lamejs could not be loaded client-side: " + err);
   }
+  /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
 
   const channels = buffer.numberOfChannels;
   const originalSr = buffer.sampleRate;
@@ -168,9 +183,9 @@ export async function audioBufferToMp3(
     const resampledLeft = new Float32Array(sampleLength);
     for (let i = 0; i < sampleLength; i++) {
       const srcIndex = i * ratio;
-      const indexLow = Math.floor(srcIndex);
+      const indexLow = Math.min(leftData.length - 1, Math.floor(srcIndex));
       const indexHigh = Math.min(leftData.length - 1, indexLow + 1);
-      const weight = srcIndex - indexLow;
+      const weight = srcIndex - Math.floor(srcIndex);
       resampledLeft[i] = leftData[indexLow] * (1 - weight) + leftData[indexHigh] * weight;
     }
     leftData = resampledLeft;
@@ -180,9 +195,9 @@ export async function audioBufferToMp3(
       const resampledRight = new Float32Array(sampleLength);
       for (let i = 0; i < sampleLength; i++) {
         const srcIndex = i * ratio;
-        const indexLow = Math.floor(srcIndex);
+        const indexLow = Math.min(rightData.length - 1, Math.floor(srcIndex));
         const indexHigh = Math.min(rightData.length - 1, indexLow + 1);
-        const weight = srcIndex - indexLow;
+        const weight = srcIndex - Math.floor(srcIndex);
         resampledRight[i] = rightData[indexLow] * (1 - weight) + rightData[indexHigh] * weight;
       }
       rightData = resampledRight;
