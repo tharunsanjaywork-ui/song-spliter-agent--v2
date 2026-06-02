@@ -834,7 +834,7 @@ function GeneratorPreviewContent() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[18px]">memory</span>
-              <span>Gemini 2.5 Flash</span>
+              <span>DeepSeek V4 Flash</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[18px]">queue_music</span>
