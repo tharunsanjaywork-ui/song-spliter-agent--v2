@@ -147,13 +147,48 @@ export async function audioBufferToMp3(
   }
 
   const channels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
+  const originalSr = buffer.sampleRate;
+  const targetSr = 44100; // Always encode MP3 at standard 44.1kHz for maximum compatibility and encoder stability
   const kbps = 128;
-  const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+  const mp3encoder = new lamejs.Mp3Encoder(channels, targetSr, kbps);
   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mp3Data: any[] = [];
   
+  // Resample channels to 44.1kHz in JS if needed
+  let leftData = buffer.getChannelData(0);
+  let rightData = channels > 1 ? buffer.getChannelData(1) : null;
+  let sampleLength = buffer.length;
+
+  if (originalSr !== targetSr) {
+    const ratio = originalSr / targetSr;
+    sampleLength = Math.round(buffer.length / ratio);
+    
+    // Resample left channel
+    const resampledLeft = new Float32Array(sampleLength);
+    for (let i = 0; i < sampleLength; i++) {
+      const srcIndex = i * ratio;
+      const indexLow = Math.floor(srcIndex);
+      const indexHigh = Math.min(leftData.length - 1, indexLow + 1);
+      const weight = srcIndex - indexLow;
+      resampledLeft[i] = leftData[indexLow] * (1 - weight) + leftData[indexHigh] * weight;
+    }
+    leftData = resampledLeft;
+    
+    // Resample right channel
+    if (rightData) {
+      const resampledRight = new Float32Array(sampleLength);
+      for (let i = 0; i < sampleLength; i++) {
+        const srcIndex = i * ratio;
+        const indexLow = Math.floor(srcIndex);
+        const indexHigh = Math.min(rightData.length - 1, indexLow + 1);
+        const weight = srcIndex - indexLow;
+        resampledRight[i] = rightData[indexLow] * (1 - weight) + rightData[indexHigh] * weight;
+      }
+      rightData = resampledRight;
+    }
+  }
+
   const floatToInt16 = (float32: Float32Array): Int16Array => {
     const int16 = new Int16Array(float32.length);
     for (let i = 0; i < float32.length; i++) {
@@ -163,12 +198,10 @@ export async function audioBufferToMp3(
     return int16;
   };
   
-  const leftInt16 = floatToInt16(buffer.getChannelData(0));
-  const rightInt16 = channels > 1 ? floatToInt16(buffer.getChannelData(1)) : null;
+  const leftInt16 = floatToInt16(leftData);
+  const rightInt16 = rightData ? floatToInt16(rightData) : null;
   
-  const sampleLength = buffer.length;
   const sampleBlockSize = 1152;
-  
   const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4;
   const blocksPerYield = cores >= 8 ? 500 : cores >= 4 ? 250 : 100;
   let blockCount = 0;
