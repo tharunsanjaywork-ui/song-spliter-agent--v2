@@ -420,12 +420,14 @@ export async function decodeAudioDataWithRetry(
       
       if (isLast) {
         throw new Error(
-          "Unable to decode audio data. Please ensure it is a valid, uncorrupted audio file."
+          "This may be the unplayable file. Check the file. If it is playing, this may be a bigger file which could not be processed in this website. Please try processing a smaller sized file or else cut the files into two by using any other website and upload this and it will separate again."
         );
       }
     }
   }
   
-  throw new Error("Unable to decode audio data.");
+  throw new Error(
+    "This may be the unplayable file. Check the file. If it is playing, this may be a bigger file which could not be processed in this website. Please try processing a smaller sized file or else cut the files into two by using any other website and upload this and it will separate again."
+  );
 }
 

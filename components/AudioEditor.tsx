@@ -552,7 +552,11 @@ export function AudioEditor({
       return;
     } catch (err) {
       console.error("Decoding error:", err);
-      setErrorMsg("Failed to decode one or more audio files. Please ensure they are valid audio files.");
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "Failed to decode one or more audio files. Please ensure they are valid audio files."
+      );
       setLoading(false);
     }
   }, [initialFileUrl, initialFileUrls]);
@@ -628,10 +632,21 @@ export function AudioEditor({
         }
       });
 
-      ws.on("error", (err: Error) => {
+      ws.on("error", (err: unknown) => {
         console.error("WaveSurfer error:", err);
         if (!cancelled) {
-          setErrorMsg("Failed to load audio waveform. Try a different file.");
+          let msg = "Failed to load audio waveform. Try a different file.";
+          if (typeof err === "string") {
+            msg = err;
+          } else if (err instanceof Error) {
+            msg = err.message;
+          } else if (err && typeof err === "object" && "message" in err) {
+            const possibleMsg = (err as Record<string, unknown>).message;
+            if (typeof possibleMsg === "string") {
+              msg = possibleMsg;
+            }
+          }
+          setErrorMsg(msg);
           setLoading(false);
         }
       });
@@ -809,7 +824,7 @@ export function AudioEditor({
       // Loading overlay stays until WaveSurfer "ready" fires
     } catch (err) {
       console.error("Merge error:", err);
-      setErrorMsg("Failed to merge segments. Please try again.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to merge segments. Please try again.");
       setLoading(false);
     }
   }, [selectedIds, segments, pushUndo, audioBuffer, initialFileUrl, initialFileUrls]);
@@ -876,7 +891,7 @@ export function AudioEditor({
       }
     } catch (err) {
       console.error("Reorder error:", err);
-      setErrorMsg("Failed to reorder segments. Please try again.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to reorder segments. Please try again.");
       setLoading(false);
     }
   }, [segments, audioBuffer, pushUndo, initialFileUrl, initialFileUrls]);
@@ -934,7 +949,7 @@ export function AudioEditor({
       saveAs(mp3Blob, `${seg.name}.mp3`);
     } catch (err) {
       console.error("Encoding error:", err);
-      setErrorMsg("Failed to encode segment to MP3.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to encode segment to MP3.");
     } finally {
       setLoading(false);
     }
@@ -970,7 +985,7 @@ export function AudioEditor({
       saveAs(content, "audiowave_editor.zip");
     } catch (err) {
       console.error("Failed to build ZIP:", err);
-      setErrorMsg("Failed to create ZIP package.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to create ZIP package.");
     } finally {
       setLoading(false);
     }
@@ -1138,7 +1153,9 @@ export function AudioEditor({
       // Loading overlay stays until WaveSurfer fires "ready"
     } catch (err) {
       console.error("Add file error:", err);
-      setErrorMsg("Failed to decode the added file. Please try a different audio file.");
+      setErrorMsg(
+        err instanceof Error ? err.message : "Failed to decode the added file. Please try a different audio file."
+      );
       setLoading(false);
     } finally {
       // Reset input so the same file can be selected again
