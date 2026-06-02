@@ -47,11 +47,6 @@ except ImportError:
     from crypto import encrypt, decrypt
     from pipeline import run_pipeline
 
-try:
-    from backend.analyzer import analyze_audio_file
-except ImportError:
-    from analyzer import analyze_audio_file
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -527,27 +522,6 @@ async def run_pipeline_background(
 ):
     """Run split pipeline in background, persistent to Firestore, cleanup on complete/error."""
     try:
-        # If client bypassed/skipped analysis (or sent empty data), run Python analyzer
-        if not analysis_json or not isinstance(analysis_json, dict) or "metadata" not in analysis_json:
-            # Yield analyzing step first to update activeStep in Firestore
-            try:
-                db = get_active_db()
-                db.collection("jobs").document(job_id).update({
-                    "activeStep": "analyzing",
-                    "currentMessage": "Analyzing audio fingerprints on server...",
-                })
-                increment_write_count(1)
-            except Exception as e:
-                logger.warning(f"Failed to update intermediate Firestore status: {e}")
-
-            if job_id in active_queues:
-                for q in list(active_queues[job_id]):
-                    await q.put({"step": "analyzing", "message": "Analyzing audio fingerprints on server..."})
-
-            # Run python analyzer
-            loop = asyncio.get_event_loop()
-            analysis_json = await loop.run_in_executor(None, analyze_audio_file, audio_path)
-
         async for event in run_pipeline(
             audio_path=audio_path,
             uid=uid,
@@ -677,12 +651,10 @@ async def process_audio(
     uid: str = Depends(get_current_uid),
 ):
     """Upload audio file, run the 4-step pipeline, stream SSE progress events."""
-    analysis_json = None
-    if analysis and analysis.strip() not in ("", "null", "{}"):
-        try:
-            analysis_json = json.loads(analysis)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid analysis JSON format.")
+    try:
+        analysis_json = json.loads(analysis)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid analysis JSON format.")
 
     # Validate the uploaded file
     content = await validate_upload(file)

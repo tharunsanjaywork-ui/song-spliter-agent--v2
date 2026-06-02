@@ -5,7 +5,7 @@ import React, {
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
-import { audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate, decodeAudioDataWithRetry } from "@/lib/audioUtils";
+import { audioBufferToMp3, sliceAudioBuffer, formatSec, getAudioDuration, calculateOptimalSampleRate, decodeAudioDataWithRetry, createSafeAudioContext } from "@/lib/audioUtils";
 import {
   saveEditorSession,
   saveEditorSegments,
@@ -468,10 +468,7 @@ export function AudioEditor({
       }
       
       // 3. Create AudioContext with dynamic sample rate optimization
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: targetSampleRate
-      });
+      const ctx = createSafeAudioContext(targetSampleRate);
       audioCtxRef.current = ctx;
       
       const decodedBuffers: AudioBuffer[] = [];
@@ -1074,10 +1071,7 @@ export function AudioEditor({
           await ctx.close();
         } catch {}
         
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
-          sampleRate: newOptimalRate
-        });
+        ctx = createSafeAudioContext(newOptimalRate);
         audioCtxRef.current = ctx;
 
         // Re-decode the original merged file

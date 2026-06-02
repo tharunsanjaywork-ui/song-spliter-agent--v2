@@ -141,6 +141,59 @@ function PreviewWarningModal({ onConfirm }: { onConfirm: () => void }) {
   );
 }
 
+// ─── Large File Warning Modal ──────────────────────────────────────────────────
+
+function LargeFileWarningModal({
+  onCancel,
+  onContinue,
+}: {
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        className="relative z-10 bg-surface-container-high border border-outline-variant rounded-2xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl"
+      >
+        <div className="absolute inset-0 border border-white/5 rounded-2xl pointer-events-none" />
+        <div className="w-12 h-12 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/30 flex items-center justify-center text-[#f59e0b] mb-4">
+          <span className="material-symbols-outlined text-[28px]">warning</span>
+        </div>
+        <h3 className="font-display-lg text-[20px] font-bold text-on-surface mb-3">
+          Large File Warning
+        </h3>
+        <p className="font-body-md text-sm text-on-surface-variant leading-relaxed mb-6">
+          This audio file is larger than 40 MB. To prevent browser crashes, the analysis will be performed sequentially in chunks. This process may take 1 to 3 minutes. Please keep this tab active.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-3 font-body-md text-sm font-semibold border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/30 rounded-full transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onContinue}
+            className="flex-1 py-3 font-body-md text-sm font-semibold bg-secondary-container hover:bg-[#5235e8] text-on-surface rounded-full border border-white/10 shadow-[0_4px_15px_rgba(68,43,189,0.3)] transition duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Continue
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function GeneratorProcessingPage() {
@@ -154,6 +207,9 @@ export default function GeneratorProcessingPage() {
     localStorage.setItem("active_generator_route", "/generator/processing");
   }, []);
   const [thinkingSeconds, setThinkingSeconds] = useState(0);
+  const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+  const [largeFileConfirmed, setLargeFileConfirmed] = useState(false);
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<string | null>(null);
   const [isWaking, setIsWaking] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [errorType, setErrorType] = useState<ErrorType | null>(null);
@@ -378,32 +434,57 @@ export default function GeneratorProcessingPage() {
   // Start pipeline once on mount
   useEffect(() => {
     if (!selectedFile || pipelineStartedRef.current) return;
-    pipelineStartedRef.current = true;
 
     const run = async () => {
+      // Check file size first
+      const isLarge = selectedFile.size > 40 * 1024 * 1024;
+      if (isLarge && !largeFileConfirmed) {
+        setShowLargeFileWarning(true);
+        return;
+      }
+
+      pipelineStartedRef.current = true;
       try {
         await wakeupServer();
         setIsWaking(false);
 
-        // Check if file is larger than 30MB
-        const isLargeFile = selectedFile.size >= 30 * 1024 * 1024;
-        let analysisResult = null;
-        if (isLargeFile) {
-          setAnalysisStatus("Large file detected. Skipping local analysis to prevent crash...");
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        } else {
-          // 1. Run local audio analysis using client RAM and CPU
-          analysisResult = await analyzeAudioFile(selectedFile, (status) => {
-            setAnalysisStatus(status);
-          });
-        }
+        // 1. Run local audio analysis using client RAM and CPU
+        const startTime = Date.now();
+        const analysisResult = await analyzeAudioFile(selectedFile, (status) => {
+          setAnalysisStatus(status);
+
+          const match = status.match(/^\[Chunk (\d+)\/(\d+)\]/);
+          if (match) {
+            const current = parseInt(match[1]);
+            const total = parseInt(match[2]);
+            if (current > 0) {
+              const elapsed = Date.now() - startTime;
+              const remainingMs = (elapsed / current) * (total - current);
+              const remainingSec = Math.ceil(remainingMs / 1000);
+              
+              if (remainingSec > 0) {
+                const mins = Math.floor(remainingSec / 60);
+                const secs = remainingSec % 60;
+                setEstimatedTimeRemaining(
+                  mins > 0 ? `${mins}m ${secs}s remaining` : `${secs}s remaining`
+                );
+              } else {
+                setEstimatedTimeRemaining("Finishing up...");
+              }
+            }
+          } else {
+            setEstimatedTimeRemaining(null);
+          }
+        });
         setAnalysisStatus(null);
+        setEstimatedTimeRemaining(null);
 
         // 2. Start file upload + streaming process
         setIsUploading(true);
         await streamProcess(selectedFile, analysisResult, handleSseEvent);
       } catch (err) {
         setAnalysisStatus(null);
+        setEstimatedTimeRemaining(null);
         setIsWaking(false);
         setIsUploading(false);
         
@@ -425,7 +506,7 @@ export default function GeneratorProcessingPage() {
       }
     };
     run();
-  }, [selectedFile, handleSseEvent]);
+  }, [selectedFile, largeFileConfirmed, handleSseEvent]);
 
   const handleErrorCancel = () => {
     setShowErrorModal(false);
@@ -581,11 +662,20 @@ export default function GeneratorProcessingPage() {
                 </p>
                 {getStepState(0) === "active" && (
                   <>
-                    <p className="font-technical-xs text-xs text-primary mt-0.5">
+                    <div className="font-technical-xs text-xs text-primary mt-0.5">
                       {activeStepId === "wakeup" && "Waking up the server…"}
-                      {activeStepId === "local_analyzing" && (analysisStatus || "Analyzing audio fingerprints...")}
+                      {activeStepId === "local_analyzing" && (
+                        <div>
+                          <span>{analysisStatus || "Analyzing audio fingerprints..."}</span>
+                          {estimatedTimeRemaining && (
+                            <span className="block text-secondary mt-1 font-technical-xs">
+                              ⏳ Estimated: {estimatedTimeRemaining}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {activeStepId === "uploading" && "Uploading files..."}
-                    </p>
+                    </div>
                     <div className="w-full mt-2">
                       <div className="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden relative">
                         <div className="absolute inset-y-0 left-0 bg-secondary rounded-full w-2/3 animate-pulse" />
@@ -845,6 +935,21 @@ export default function GeneratorProcessingPage() {
       <AnimatePresence>
         {showPreviewWarning && (
           <PreviewWarningModal onConfirm={() => router.push(`/generator/preview?jobId=${jobId || ""}`)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showLargeFileWarning && (
+          <LargeFileWarningModal
+            onCancel={() => {
+              setShowLargeFileWarning(false);
+              router.push("/generator/upload");
+            }}
+            onContinue={() => {
+              setShowLargeFileWarning(false);
+              setLargeFileConfirmed(true);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>

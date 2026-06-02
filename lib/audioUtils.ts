@@ -124,7 +124,9 @@ export function calculateOptimalSampleRate(totalDurationSec: number): number {
   if (maxSampleRate >= 44100) return 44100;
   if (maxSampleRate >= 32000) return 32000;
   if (maxSampleRate >= 22050) return 22050;
-  return 16000;
+  if (maxSampleRate >= 16000) return 16000;
+  if (maxSampleRate >= 11025) return 11025;
+  return 8000;
 }
 
 /**
@@ -253,6 +255,35 @@ export async function resampleAudioBuffer(
 }
 
 /**
+ * Safely creates an AudioContext at the target sample rate.
+ * If the browser throws an error due to the rate being too low, it automatically falls back
+ * through standard rates (22050Hz, 32000Hz, or native hardware rate).
+ */
+export function createSafeAudioContext(targetRate: number): AudioContext {
+  const AudioContextClass = typeof window !== "undefined"
+    ? (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+    : null;
+    
+  if (!AudioContextClass) {
+    throw new Error("Web Audio API is not supported in this environment.");
+  }
+
+  const rates = [targetRate, 22050, 32000, 0];
+  for (const rate of rates) {
+    try {
+      if (rate === 0) {
+        return new AudioContextClass();
+      } else {
+        return new AudioContextClass({ sampleRate: rate });
+      }
+    } catch (err) {
+      console.warn(`Failed to create AudioContext at ${rate}Hz, trying fallback...`, err);
+    }
+  }
+  throw new Error("Failed to create AudioContext after all fallbacks.");
+}
+
+/**
  * Decodes an audio file array buffer into an AudioBuffer at a target sample rate.
  * Uses a robust, multi-stage retry fallback sequence to handle browser decoding limitations and OOM:
  * 1. Tries to decode directly at the target sample rate (reusing existingCtx if provided).
@@ -281,14 +312,11 @@ export async function decodeAudioDataWithRetry(
   };
 
   // Build the list of rates to try in order
-  const isLarge = arrayBuffer.byteLength > 15 * 1024 * 1024;
   const ratesToTry = [targetSampleRate];
   if (targetSampleRate < 22050) ratesToTry.push(22050);
-  if (!isLarge) {
-    if (targetSampleRate < 32000) ratesToTry.push(32000);
-    // Last fallback is native default rate (0 will represent new AudioContext Class with no options)
-    ratesToTry.push(0);
-  }
+  if (targetSampleRate < 32000) ratesToTry.push(32000);
+  // Last fallback is native default rate (0 will represent new AudioContext Class with no options)
+  ratesToTry.push(0);
 
   for (let idx = 0; idx < ratesToTry.length; idx++) {
     const rate = ratesToTry[idx];

@@ -98,68 +98,216 @@ function fft(re: Float32Array, im: Float32Array) {
   }
 }
 
+export function findMp3FrameBoundaries(arrayBuffer: ArrayBuffer): number[] {
+  const bytes = new Uint8Array(arrayBuffer);
+  const len = bytes.length;
+  const offsets: number[] = [];
+  let offset = 0;
+
+  const bitrateTableV1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+  const bitrateTableV2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+  const sampleRateTable = [
+    [44100, 48000, 32000, 0], // V1
+    [22050, 24000, 16000, 0], // V2
+    [11025, 12000, 8000, 0]   // V2.5
+  ];
+
+  while (offset < len - 4) {
+    if (bytes[offset] !== 0xFF || (bytes[offset + 1] & 0xE0) !== 0xE0) {
+      offset++;
+      continue;
+    }
+
+    const versionIndex = (bytes[offset + 1] >> 3) & 0x03;
+    const layer = (bytes[offset + 1] >> 1) & 0x03;
+    const bitrateIndex = (bytes[offset + 2] >> 4) & 0x0F;
+    const sampleRateIndex = (bytes[offset + 2] >> 2) & 0x03;
+    const padding = (bytes[offset + 2] >> 1) & 0x01;
+
+    if (versionIndex === 1 || layer === 0 || bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) {
+      offset++;
+      continue;
+    }
+
+    const versionMap = [2, -1, 1, 0];
+    const version = versionMap[versionIndex];
+    if (version === -1) {
+      offset++;
+      continue;
+    }
+
+    const bitrate = version === 0 ? bitrateTableV1[bitrateIndex] * 1000 : bitrateTableV2[bitrateIndex] * 1000;
+    const sampleRate = sampleRateTable[version][sampleRateIndex];
+
+    let frameSize = 0;
+    if (layer === 3) {
+      frameSize = Math.floor((12 * bitrate) / sampleRate + padding) * 4;
+    } else {
+      const coefficients = version === 0 ? 144 : 72;
+      frameSize = Math.floor((coefficients * bitrate) / sampleRate) + padding;
+    }
+
+    if (frameSize <= 0) {
+      offset++;
+      continue;
+    }
+
+    offsets.push(offset);
+    offset += frameSize;
+  }
+
+  return offsets;
+}
+
 export async function analyzeAudioFile(
   file: File,
   onProgress: (status: string) => void
 ): Promise<AnalysisResult> {
   const arrayBuffer = await file.arrayBuffer();
-  const audioBuffer = await decodeAudioDataWithRetry(arrayBuffer, 16000, onProgress);
-  
-  onProgress("Mixing to mono & downsampling to 16kHz...");
-  const duration = audioBuffer.duration;
-  const numChannels = audioBuffer.numberOfChannels;
-  const originalSr = audioBuffer.sampleRate;
-  const targetSr = 16000;
-  
-  // Mix stereo channels to mono
-  const chData = audioBuffer.getChannelData(0);
-  const monoData = new Float32Array(chData.length);
-  if (numChannels > 1) {
-    const chData2 = audioBuffer.getChannelData(1);
-    for (let i = 0; i < chData.length; i++) {
-      monoData[i] = (chData[i] + chData2[i]) / 2;
+
+  onProgress("Scanning frame boundaries...");
+  const frameBoundaries = findMp3FrameBoundaries(arrayBuffer);
+
+  const CHUNK_SIZE_LIMIT = 8 * 1024 * 1024; // ~8MB per chunk
+  const chunks: Array<{ start: number; end: number }> = [];
+
+  if (frameBoundaries.length > 0) {
+    let currentStart = 0;
+    let nextBoundaryIndex = 0;
+
+    while (currentStart < arrayBuffer.byteLength) {
+      const targetEnd = currentStart + CHUNK_SIZE_LIMIT;
+      let currentEnd = arrayBuffer.byteLength;
+
+      while (nextBoundaryIndex < frameBoundaries.length && frameBoundaries[nextBoundaryIndex] < targetEnd) {
+        nextBoundaryIndex++;
+      }
+
+      if (nextBoundaryIndex < frameBoundaries.length) {
+        currentEnd = frameBoundaries[nextBoundaryIndex];
+      }
+
+      chunks.push({ start: currentStart, end: currentEnd });
+      currentStart = currentEnd;
     }
   } else {
-    monoData.set(chData);
+    chunks.push({ start: 0, end: arrayBuffer.byteLength });
   }
-  
-  // Linear Downsampling to 16000Hz (same as Python's downsampling step)
-  const ratio = originalSr / targetSr;
-  const downsampledLength = Math.round(monoData.length / ratio);
-  const data = new Float32Array(downsampledLength);
-  for (let i = 0; i < downsampledLength; i++) {
-    const srcIndex = Math.round(i * ratio);
-    data[i] = monoData[Math.min(srcIndex, monoData.length - 1)];
-  }
-  
-  onProgress("Extracting fine energy envelope...");
-  
-  // Device performance detection
+
+  const targetSr = 16000;
   const cores = typeof navigator !== "undefined" ? (navigator.hardwareConcurrency || 4) : 4;
   const isMobile = typeof navigator !== "undefined" ? /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) : false;
-  
-  // Choose settings based on performance
-  // Default (High Performance): hopFine = 160 (10ms), fftSize = 2048
-  // Low Performance (low core count or mobile): hopFine = 320 (20ms), fftSize = 1024
+
   const useLowSpec = isMobile || cores <= 4;
   const hopFine = useLowSpec ? 320 : 160;
   const fftSize = useLowSpec ? 1024 : 2048;
   const frameDuration = hopFine / targetSr;
-  
   const frameLength = useLowSpec ? 512 : 800;
+
+  // Hann Window Cache
+  const hann = new Float32Array(fftSize);
+  for (let i = 0; i < fftSize; i++) {
+    hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (fftSize - 1)));
+  }
+
   const rmsFine: number[] = [];
   const tFine: number[] = [];
-  
-  for (let i = 0; i < data.length; i += hopFine) {
-    if (i + frameLength > data.length) break;
-    let sumSq = 0;
-    for (let j = 0; j < frameLength; j++) {
-      sumSq += data[i + j] * data[i + j];
+  const spectrograms: Float32Array[] = [];
+  const centroids: number[] = [];
+
+  let cumulativeTimeOffset = 0;
+  const fftRe = new Float32Array(fftSize);
+  const fftIm = new Float32Array(fftSize);
+
+  // Instantiating a single shared AudioContext for native downsampled decoding
+  const AudioContextClass = typeof window !== "undefined"
+    ? (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+    : null;
+  let sharedCtx: AudioContext | null = null;
+  if (AudioContextClass) {
+    try {
+      sharedCtx = new AudioContextClass({ sampleRate: targetSr });
+    } catch (e) {
+      console.warn("Failed to instantiate AudioContext with target sampleRate 16kHz:", e);
     }
-    rmsFine.push(Math.sqrt(sumSq / frameLength));
-    tFine.push(i / targetSr);
   }
-  
+
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const chunkBuffer = arrayBuffer.slice(chunk.start, chunk.end);
+
+      const progressPrefix = chunks.length > 1 ? `[Chunk ${i + 1}/${chunks.length}] ` : "";
+      const decodedChunk = await decodeAudioDataWithRetry(
+        chunkBuffer,
+        targetSr,
+        (status) => onProgress(`${progressPrefix}${status}`),
+        sharedCtx || undefined
+      );
+
+      const numChannels = decodedChunk.numberOfChannels;
+      const chData = decodedChunk.getChannelData(0);
+      const chunkMono = new Float32Array(chData.length);
+      if (numChannels > 1) {
+        const chData2 = decodedChunk.getChannelData(1);
+        for (let j = 0; j < chData.length; j++) {
+          chunkMono[j] = (chData[j] + chData2[j]) / 2;
+        }
+      } else {
+        chunkMono.set(chData);
+      }
+
+      // Process RMS fine for this chunk
+      for (let j = 0; j < chunkMono.length; j += hopFine) {
+        if (j + frameLength > chunkMono.length) break;
+        let sumSq = 0;
+        for (let k = 0; k < frameLength; k++) {
+          sumSq += chunkMono[j + k] * chunkMono[j + k];
+        }
+        rmsFine.push(Math.sqrt(sumSq / frameLength));
+        tFine.push(cumulativeTimeOffset + j / targetSr);
+      }
+
+      // Process spectrograms and centroids for this chunk
+      const chunkTotalSec = Math.floor(decodedChunk.duration);
+      for (let s = 0; s < chunkTotalSec; s++) {
+        const startIdx = s * 16000;
+        fftRe.fill(0);
+        fftIm.fill(0);
+        for (let j = 0; j < fftSize; j++) {
+          const idx = startIdx + j;
+          if (idx < chunkMono.length) {
+            fftRe[j] = chunkMono[idx] * hann[j];
+          }
+        }
+
+        fft(fftRe, fftIm);
+
+        const mags = new Float32Array(fftSize / 2);
+        let centroidSum = 0;
+        let magSum = 0;
+        for (let j = 0; j < fftSize / 2; j++) {
+          const mag = Math.sqrt(fftRe[j] * fftRe[j] + fftIm[j] * fftIm[j]);
+          mags[j] = mag;
+          centroidSum += j * mag;
+          magSum += mag;
+        }
+        spectrograms.push(mags);
+        centroids.push(magSum > 0 ? centroidSum / magSum : 0);
+      }
+
+      cumulativeTimeOffset += decodedChunk.duration;
+    }
+  } finally {
+    if (sharedCtx) {
+      try {
+        await sharedCtx.close();
+      } catch (e) {
+        console.warn("Failed to close shared AudioContext:", e);
+      }
+    }
+  }
+
   // Convert RMS fine to dB relative to maximum energy value (matching librosa)
   let maxRms = 1e-5;
   for (const r of rmsFine) {
@@ -170,9 +318,11 @@ export async function analyzeAudioFile(
     const db = ratioVal > 0 ? 20 * Math.log10(ratioVal) : -100;
     return Math.max(db, -100);
   });
-  
+
+  const duration = cumulativeTimeOffset;
+  const totalSec = Math.min(Math.floor(duration), centroids.length);
+
   // Group fine energy into 1-second chunks
-  const totalSec = Math.floor(duration);
   const energyPerSec: number[] = [];
   for (let s = 0; s < totalSec; s++) {
     let lo = 0;
@@ -257,46 +407,7 @@ export async function analyzeAudioFile(
     }
   }
   
-  onProgress("Running spectral transition analysis (FFT)...");
-  
-  // Calculate Spectral Centroid (Timbre) and Spectral Flux (Chroma Key/Novelty proxies)
-  const fftRe = new Float32Array(fftSize);
-  const fftIm = new Float32Array(fftSize);
-  
-  // Hann Window Cache
-  const hann = new Float32Array(fftSize);
-  for (let i = 0; i < fftSize; i++) {
-    hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (fftSize - 1)));
-  }
-  
-  const spectrograms: Float32Array[] = [];
-  const centroids: number[] = [];
-  
-  for (let s = 0; s < totalSec; s++) {
-    const startIdx = s * 16000;
-    fftRe.fill(0);
-    fftIm.fill(0);
-    for (let i = 0; i < fftSize; i++) {
-      const idx = startIdx + i;
-      if (idx < data.length) {
-        fftRe[i] = data[idx] * hann[i];
-      }
-    }
-    
-    fft(fftRe, fftIm);
-    
-    const mags = new Float32Array(fftSize / 2);
-    let centroidSum = 0;
-    let magSum = 0;
-    for (let i = 0; i < fftSize / 2; i++) {
-      const mag = Math.sqrt(fftRe[i] * fftRe[i] + fftIm[i] * fftIm[i]);
-      mags[i] = mag;
-      centroidSum += i * mag;
-      magSum += mag;
-    }
-    spectrograms.push(mags);
-    centroids.push(magSum > 0 ? centroidSum / magSum : 0);
-  }
+
   
   // Calculate mfcc_change proxy (spectral centroid change scaled to 0-60)
   const mfccChange: number[] = [0];
