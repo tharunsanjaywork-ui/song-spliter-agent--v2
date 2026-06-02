@@ -124,8 +124,7 @@ export function calculateOptimalSampleRate(totalDurationSec: number): number {
   if (maxSampleRate >= 44100) return 44100;
   if (maxSampleRate >= 32000) return 32000;
   if (maxSampleRate >= 22050) return 22050;
-  if (maxSampleRate >= 16000) return 16000;
-  return 11025;
+  return 16000;
 }
 
 /**
@@ -282,11 +281,14 @@ export async function decodeAudioDataWithRetry(
   };
 
   // Build the list of rates to try in order
+  const isLarge = arrayBuffer.byteLength > 15 * 1024 * 1024;
   const ratesToTry = [targetSampleRate];
   if (targetSampleRate < 22050) ratesToTry.push(22050);
-  if (targetSampleRate < 32000) ratesToTry.push(32000);
-  // Last fallback is native default rate (0 will represent new AudioContext Class with no options)
-  ratesToTry.push(0);
+  if (!isLarge) {
+    if (targetSampleRate < 32000) ratesToTry.push(32000);
+    // Last fallback is native default rate (0 will represent new AudioContext Class with no options)
+    ratesToTry.push(0);
+  }
 
   for (let idx = 0; idx < ratesToTry.length; idx++) {
     const rate = ratesToTry[idx];

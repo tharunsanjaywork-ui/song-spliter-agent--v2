@@ -169,13 +169,13 @@ function parseSseBuffer(
 
 export async function streamProcess(
   file: File,
-  analysis: AnalysisResult,
+  analysis: AnalysisResult | null,
   onEvent: (event: ProcessingEvent) => void
 ): Promise<void> {
   const headers = await authHeaders();
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("analysis", JSON.stringify(analysis));
+  formData.append("analysis", analysis ? JSON.stringify(analysis) : "");
 
   const response = await fetch(`${BACKEND_URL}/api/process`, {
     method: "POST",

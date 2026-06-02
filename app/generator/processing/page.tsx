@@ -385,10 +385,18 @@ export default function GeneratorProcessingPage() {
         await wakeupServer();
         setIsWaking(false);
 
-        // 1. Run local audio analysis using client RAM and CPU
-        const analysisResult = await analyzeAudioFile(selectedFile, (status) => {
-          setAnalysisStatus(status);
-        });
+        // Check if file is larger than 30MB
+        const isLargeFile = selectedFile.size >= 30 * 1024 * 1024;
+        let analysisResult = null;
+        if (isLargeFile) {
+          setAnalysisStatus("Large file detected. Skipping local analysis to prevent crash...");
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } else {
+          // 1. Run local audio analysis using client RAM and CPU
+          analysisResult = await analyzeAudioFile(selectedFile, (status) => {
+            setAnalysisStatus(status);
+          });
+        }
         setAnalysisStatus(null);
 
         // 2. Start file upload + streaming process
